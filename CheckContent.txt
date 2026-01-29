@@ -1,0 +1,20 @@
+﻿eady defines a member called 'UserLogController' with the same parameter types
+C:\Users\raphael.eric\Pbackdcl\ncba.dcl\NCBA.DCL\Controllers\UserLogController.cs(23,38): error CS0111: Type 'UserLogController' already defines a member called 'GetLogs' with the same parameter types
+C:\Users\raphael.eric\Pbackdcl\ncba.dcl\NCBA.DCL\Controllers\UserController.cs(21,12): error CS0111: Type 'UserController' already defines a member called 'UserController' with the same parameter types
+C:\Users\raphael.eric\Pbackdcl\ncba.dcl\NCBA.DCL\Controllers\UserController.cs(32,38): error CS0111: Type 'UserController' already defines a member called 'CreateUser' with the same parameter types 
+C:\Users\raphael.eric\Pbackdcl\ncba.dcl\NCBA.DCL\Controllers\UserController.cs(121,38): error CS0111: Type 'UserController' already defines a member called 'GetUsers' with the same parameter types  
+C:\Users\raphael.eric\Pbackdcl\ncba.dcl\NCBA.DCL\Controllers\UserController.cs(154,38): error CS0111: Type 'UserController' already defines a member called 'GetStats' with the same parameter types  
+C:\Users\raphael.eric\Pbackdcl\ncba.dcl\NCBA.DCL\Controllers\UserController.cs(190,38): error CS0111: Type 'UserController' already defines a member called 'ToggleActive' with the same parameter types
+C:\Users\raphael.eric\Pbackdcl\ncba.dcl\NCBA.DCL\Controllers\UserController.cs(218,38): error CS0111: Type 'UserController' already defines a member called 'ChangeRole' with the same parameter types
+C:\Users\raphael.eric\Pbackdcl\ncba.dcl\NCBA.DCL\Controllers\RMController.cs(19,12): error CS0111: Type 'RMController' already defines a member called 'RMController' with the same parameter types   
+C:\Users\raphael.eric\Pbackdcl\ncba.dcl\NCBA.DCL\Controllers\RMController.cs(28,38): error CS0111: Type 'RMController' already defines a member called 'GetMyQueue' with the same parameter types     
+C:\Users\raphael.eric\Pbackdcl\ncba.dcl\NCBA.DCL\Controllers\RMController.cs(68,38): error CS0111: Type 'RMController' already defines a member called 'SubmitToCoCreator' with the same parameter types
+C:\Users\raphael.eric\Pbackdcl\ncba.dcl\NCBA.DCL\Controllers\RMController.cs(135,38): error CS0111: Type 'RMController' already defines a member called 'GetCompletedDCLs' with the same parameter types
+C:\Users\raphael.eric\Pbackdcl\ncba.dcl\NCBA.DCL\Controllers\RMController.cs(173,38): error CS0111: Type 'RMController' already defines a member called 'DeleteDCL' with the same parameter types     
+C:\Users\raphael.eric\Pbackdcl\ncba.dcl\NCBA.DCL\Controllers\RMController.cs(206,38): error CS0111: Type 'RMController' already defines a member called 'GetChecklistById' with the same parameter types
+C:\Users\raphael.eric\Pbackdcl\ncba.dcl\NCBA.DCL\Controllers\RMController.cs(239,38): error CS0111: Type 'RMController' already defines a member called 'DeleteDocumentFile' with the same parameter types
+C:\Users\raphael.eric\Pbackdcl\ncba.dcl\NCBA.DCL\Controllers\RMController.cs(285,38): error CS0111: Type 'RMController' already defines a member called 'GetNotifications' with the same parameter types
+C:\Users\raphael.eric\Pbackdcl\ncba.dcl\NCBA.DCL\Controllers\RMController.cs(313,38): error CS0111: Type 'RMController' already defines a member called 'MarkNotificationAsRead' with the same parameter types
+
+The build failed. Fix the build errors and run ausing Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;

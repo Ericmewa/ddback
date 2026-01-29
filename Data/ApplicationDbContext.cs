@@ -1,0 +1,233 @@
+using Microsoft.EntityFrameworkCore;
+using NCBA.DCL.Models;
+
+namespace NCBA.DCL.Data;
+
+public class ApplicationDbContext : DbContext
+{
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
+    {
+    }
+
+    public DbSet<User> Users { get; set; }
+    public DbSet<Checklist> Checklists { get; set; }
+    public DbSet<Document> Documents { get; set; }
+    public DbSet<DocumentCategory> DocumentCategories { get; set; }
+    public DbSet<CoCreatorFile> CoCreatorFiles { get; set; }
+    public DbSet<ChecklistLog> ChecklistLogs { get; set; }
+    public DbSet<Deferral> Deferrals { get; set; }
+    public DbSet<Facility> Facilities { get; set; }
+    public DbSet<DeferralDocument> DeferralDocuments { get; set; }
+    public DbSet<Approver> Approvers { get; set; }
+    public DbSet<UserLog> UserLogs { get; set; }
+    public DbSet<AuditLog> AuditLogs { get; set; }
+    public DbSet<Notification> Notifications { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        // User configuration
+        modelBuilder.Entity<User>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.Email).IsUnique();
+            entity.HasIndex(e => e.CustomerId).IsUnique();
+            entity.HasIndex(e => e.RmId).IsUnique();
+
+            entity.Property(e => e.Role)
+                .HasConversion<string>();
+
+            // Navigation: User creates checklists
+            entity.HasMany(u => u.CreatedChecklists)
+                .WithOne(c => c.CreatedBy)
+                .HasForeignKey(c => c.CreatedById)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Navigation: User assigned as RM
+            entity.HasMany(u => u.AssignedAsRM)
+                .WithOne(c => c.AssignedToRM)
+                .HasForeignKey(c => c.AssignedToRMId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Navigation: User assigned as CoChecker
+            entity.HasMany(u => u.AssignedAsCoChecker)
+                .WithOne(c => c.AssignedToCoChecker)
+                .HasForeignKey(c => c.AssignedToCoCheckerId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // UserLog relations
+            entity.HasMany(u => u.TargetUserLogs)
+                .WithOne(l => l.TargetUser)
+                .HasForeignKey(l => l.TargetUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasMany(u => u.PerformedByLogs)
+                .WithOne(l => l.PerformedBy)
+                .HasForeignKey(l => l.PerformedById)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Deferrals
+            entity.HasMany(u => u.CreatedDeferrals)
+                .WithOne(d => d.CreatedBy)
+                .HasForeignKey(d => d.CreatedById)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // Checklist configuration
+        modelBuilder.Entity<Checklist>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Status)
+                .HasConversion<string>();
+
+            // Customer relationship (optional)
+            entity.HasOne(c => c.Customer)
+                .WithMany()
+                .HasForeignKey(c => c.CustomerId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // DocumentCategory configuration
+        modelBuilder.Entity<DocumentCategory>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasOne(dc => dc.Checklist)
+                .WithMany(c => c.Documents)
+                .HasForeignKey(dc => dc.ChecklistId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Document configuration
+        modelBuilder.Entity<Document>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Status)
+                .HasConversion<string>();
+            entity.Property(e => e.CreatorStatus)
+                .HasConversion<string>();
+            entity.Property(e => e.CheckerStatus)
+                .HasConversion<string>();
+            entity.Property(e => e.RmStatus)
+                .HasConversion<string>();
+
+            entity.HasOne(d => d.DocumentCategory)
+                .WithMany(dc => dc.DocList)
+                .HasForeignKey(d => d.CategoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // CoCreatorFile configuration
+        modelBuilder.Entity<CoCreatorFile>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasOne(f => f.Document)
+                .WithMany(d => d.CoCreatorFiles)
+                .HasForeignKey(f => f.DocumentId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ChecklistLog configuration
+        modelBuilder.Entity<ChecklistLog>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasOne(l => l.Checklist)
+                .WithMany(c => c.Logs)
+                .HasForeignKey(l => l.ChecklistId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(l => l.User)
+                .WithMany()
+                .HasForeignKey(l => l.UserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // Deferral configuration
+        modelBuilder.Entity<Deferral>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.DeferralNumber).IsUnique();
+            entity.Property(e => e.Status)
+                .HasConversion<string>();
+        });
+
+        // Facility configuration
+        modelBuilder.Entity<Facility>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Sanctioned)
+                .HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Balance)
+                .HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Headroom)
+                .HasColumnType("decimal(18,2)");
+
+            entity.HasOne(f => f.Deferral)
+                .WithMany(d => d.Facilities)
+                .HasForeignKey(f => f.DeferralId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // DeferralDocument configuration
+        modelBuilder.Entity<DeferralDocument>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasOne(d => d.Deferral)
+                .WithMany(def => def.Documents)
+                .HasForeignKey(d => d.DeferralId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(d => d.UploadedBy)
+                .WithMany()
+                .HasForeignKey(d => d.UploadedById)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // Approver configuration
+        modelBuilder.Entity<Approver>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasOne(a => a.Deferral)
+                .WithMany(d => d.Approvers)
+                .HasForeignKey(a => a.DeferralId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // UserLog configuration
+        modelBuilder.Entity<UserLog>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+        });
+
+        // Notification configuration
+        modelBuilder.Entity<Notification>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasOne(n => n.User)
+                .WithMany(u => u.Notifications)
+                .HasForeignKey(n => n.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        var entries = ChangeTracker.Entries()
+            .Where(e => e.Entity is User || e.Entity is Checklist ||
+                       e.Entity is Document || e.Entity is Deferral ||
+                       e.Entity is Notification);
+
+        foreach (var entry in entries)
+        {
+            if (entry.State == EntityState.Modified)
+            {
+                if (entry.Entity.GetType().GetProperty("UpdatedAt") != null)
+                {
+                    entry.Property("UpdatedAt").CurrentValue = DateTime.UtcNow;
+                }
+            }
+        }
+
+        return base.SaveChangesAsync(cancellationToken);
+    }
+}
