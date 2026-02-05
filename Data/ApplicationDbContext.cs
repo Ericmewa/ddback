@@ -27,6 +27,9 @@ public class ApplicationDbContext : DbContext
     public DbSet<ExtensionApprover> ExtensionApprovers { get; set; }
     public DbSet<ExtensionHistory> ExtensionHistories { get; set; }
     public DbSet<ExtensionComment> ExtensionComments { get; set; }
+    public DbSet<ExtensionFile> ExtensionFiles { get; set; }
+    public DbSet<SupportingDoc> SupportingDocs { get; set; }
+
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -261,6 +264,20 @@ public class ApplicationDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.HasOne(ec => ec.Extension).WithMany(e => e.Comments).HasForeignKey(ec => ec.ExtensionId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(ec => ec.Author).WithMany().HasForeignKey(ec => ec.AuthorId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // ExtensionFile configuration
+        modelBuilder.Entity<ExtensionFile>(entity =>
+        {
+            entity.HasKey(ef => ef.Id);
+            entity.HasOne(ef => ef.Extension).WithMany(e => e.AdditionalFiles).HasForeignKey(ef => ef.ExtensionId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // SupportingDoc configuration
+        modelBuilder.Entity<SupportingDoc>(entity =>
+        {
+            entity.HasKey(sd => sd.Id);
+            entity.HasOne(sd => sd.Checklist).WithMany(c => c.SupportingDocs).HasForeignKey(sd => sd.ChecklistId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 

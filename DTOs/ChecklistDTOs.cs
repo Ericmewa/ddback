@@ -16,6 +16,9 @@ public class CreateChecklistRequest
     public string CustomerNumber { get; set; } = string.Empty;
     public string? CustomerName { get; set; }
     public string? LoanType { get; set; }
+    public string? IbpsNo { get; set; }
+    public Guid? AssignedToRMId { get; set; }
+    public List<DocumentCategoryDto>? Documents { get; set; }
 }
 
 public class UpdateChecklistRequest
@@ -96,4 +99,25 @@ public class RejectDCLRequest
 public class SubmitToCoCreatorRequest
 {
     public Guid ChecklistId { get; set; }
+    public string? RmGeneralComment { get; set; }
+    public List<RmDocumentUpdateDto>? Documents { get; set; }
+}
+
+public class RmDocumentUpdateDto
+{
+    public string Category { get; set; } = string.Empty;
+    public string? Action { get; set; }
+    public DocumentStatus? Status { get; set; }
+    public RmStatus? RmStatus { get; set; }
+    public string? Comment { get; set; }
+    public string? FileUrl { get; set; }
+    public string? DeferralReason { get; set; }
+    public string? DeferralNumber { get; set; }
+    public Guid _id { get; set; } // Using _id to match frontend's convention or Id
+    public Guid Id { get; set; }
+}
+
+public class UploadSupportingDocDto
+{
+    public IFormFile File { get; set; } = null!;
 }

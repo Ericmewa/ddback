@@ -77,7 +77,9 @@ public class CustomerController : ControllerBase
                     Id = c.Id,
                     DclNo = c.DclNo!,
                     CustomerName = c.CustomerName,
+                    BusinessName = c.CustomerName, // Mapping CustomerName to BusinessName as per logic
                     CustomerNumber = c.CustomerNumber,
+                    LoanType = c.LoanType,
                     Status = c.Status.ToString(),
                     CreatedAt = c.CreatedAt
                 })

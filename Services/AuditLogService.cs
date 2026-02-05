@@ -11,27 +11,34 @@ namespace NCBA.DCL.Services
     public class AuditLogService : IAuditLogService
     {
         private readonly ApplicationDbContext _db;
-        public AuditLogService(ApplicationDbContext db)
+        private readonly OnlineUserTracker _onlineUserTracker;
+
+        public AuditLogService(ApplicationDbContext db, OnlineUserTracker onlineUserTracker)
         {
             _db = db;
+            _onlineUserTracker = onlineUserTracker;
         }
 
         public async Task<(int StatusCode, object Body)> GetLogsAsync(int page, int limit, string? action, Guid? userId, string? resource, string? status, DateTime? startDate, DateTime? endDate, string? search)
         {
             var query = _db.AuditLogs.AsQueryable();
-            if (!string.IsNullOrEmpty(action)) query = query.Where(x => x.Action == action);
+
+            if (!string.IsNullOrEmpty(action) && action != "null") query = query.Where(x => x.Action == action);
             if (userId.HasValue) query = query.Where(x => x.PerformedById == userId);
-            if (!string.IsNullOrEmpty(resource)) query = query.Where(x => x.Resource == resource);
-            if (!string.IsNullOrEmpty(status)) query = query.Where(x => x.Status == status);
+            if (!string.IsNullOrEmpty(resource) && resource != "null") query = query.Where(x => x.Resource == resource);
+            if (!string.IsNullOrEmpty(status) && status != "null") query = query.Where(x => x.Status == status);
+
             if (startDate.HasValue) query = query.Where(x => x.CreatedAt >= startDate);
             if (endDate.HasValue) query = query.Where(x => x.CreatedAt <= endDate);
-            if (!string.IsNullOrEmpty(search))
+
+            if (!string.IsNullOrEmpty(search) && search != "null")
             {
                 query = query.Where(x =>
                     x.Action.Contains(search) ||
                     (x.Resource != null && x.Resource.Contains(search)) ||
                     (x.Details != null && x.Details.Contains(search)));
             }
+
             var total = await query.CountAsync();
             var logs = await query
                 .Include(x => x.PerformedBy)
@@ -40,6 +47,7 @@ namespace NCBA.DCL.Services
                 .Skip((page - 1) * limit)
                 .Take(limit)
                 .ToListAsync();
+
             return (200, new { logs, total, page, limit });
         }
 
@@ -49,7 +57,9 @@ namespace NCBA.DCL.Services
                 .Include(x => x.PerformedBy)
                 .Include(x => x.TargetUser)
                 .FirstOrDefaultAsync(x => x.Id == id);
+
             if (log == null) return (404, new { message = "Audit log not found" });
+
             return (200, log);
         }
 
@@ -59,40 +69,49 @@ namespace NCBA.DCL.Services
             {
                 Action = dto.Action,
                 Resource = dto.Resource,
-                Status = dto.Status,
+                ResourceId = dto.ResourceId,
+                Status = dto.Status ?? "success",
                 Details = dto.Details,
                 ErrorMessage = dto.ErrorMessage,
                 PerformedById = dto.PerformedById,
                 TargetUserId = dto.TargetUserId,
+                IpAddress = dto.IpAddress,
+                UserAgent = dto.UserAgent,
                 CreatedAt = DateTime.UtcNow
             };
+
             _db.AuditLogs.Add(log);
             await _db.SaveChangesAsync();
+
             return (201, log);
         }
 
         public async Task<(int StatusCode, object Body)> ExportLogsAsync(string? action, Guid? userId, string? resource, string? status, DateTime? startDate, DateTime? endDate, string? search)
         {
             var query = _db.AuditLogs.AsQueryable();
-            if (!string.IsNullOrEmpty(action)) query = query.Where(x => x.Action == action);
+
+            if (!string.IsNullOrEmpty(action) && action != "null") query = query.Where(x => x.Action == action);
             if (userId.HasValue) query = query.Where(x => x.PerformedById == userId);
-            if (!string.IsNullOrEmpty(resource)) query = query.Where(x => x.Resource == resource);
-            if (!string.IsNullOrEmpty(status)) query = query.Where(x => x.Status == status);
+            if (!string.IsNullOrEmpty(resource) && resource != "null") query = query.Where(x => x.Resource == resource);
+            if (!string.IsNullOrEmpty(status) && status != "null") query = query.Where(x => x.Status == status);
+
             if (startDate.HasValue) query = query.Where(x => x.CreatedAt >= startDate);
             if (endDate.HasValue) query = query.Where(x => x.CreatedAt <= endDate);
-            if (!string.IsNullOrEmpty(search))
+
+            if (!string.IsNullOrEmpty(search) && search != "null")
             {
                 query = query.Where(x =>
                     x.Action.Contains(search) ||
                     (x.Resource != null && x.Resource.Contains(search)) ||
                     (x.Details != null && x.Details.Contains(search)));
             }
+
             var logs = await query
                 .Include(x => x.PerformedBy)
                 .Include(x => x.TargetUser)
                 .OrderByDescending(x => x.CreatedAt)
                 .ToListAsync();
-            // CSV export logic to be implemented in controller
+
             return (200, logs);
         }
 
@@ -103,13 +122,14 @@ namespace NCBA.DCL.Services
             var todayLogs = await _db.AuditLogs.CountAsync(x => x.CreatedAt >= todayStart);
             var successLogs = await _db.AuditLogs.CountAsync(x => x.Status == "success");
             var failureLogs = await _db.AuditLogs.CountAsync(x => x.Status == "failure");
+
             return (200, new { totalLogs, todayLogs, successLogs, failureLogs });
         }
 
         public Task<(int StatusCode, object Body)> GetOnlineUsersWithActivityAsync()
         {
-            // Placeholder: online users tracking is not implemented in backend
-            return Task.FromResult<(int, object)>((200, Array.Empty<object>()));
+            var onlineUsers = _onlineUserTracker.GetAll();
+            return Task.FromResult<(int, object)>((200, onlineUsers));
         }
     }
 }

@@ -28,7 +28,6 @@ namespace NCBA.DCL.DTOs
 
     public class ReassignTasksDto
     {
-        public string[] TaskIds { get; set; }
-        public string NewAssigneeId { get; set; }
+        public string ToUserId { get; set; }
     }
 }

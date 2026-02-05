@@ -7,7 +7,7 @@ public class OnlineUserTracker
 {
     private readonly ConcurrentDictionary<Guid, OnlineUser> _users = new();
 
-    public IReadOnlyCollection<OnlineUser> GetAll() => _users.Values;
+    public IReadOnlyCollection<OnlineUser> GetAll() => _users.Values.ToList();
 
     public void AddSocket(Guid userId, string socketId, OnlineUser info)
     {

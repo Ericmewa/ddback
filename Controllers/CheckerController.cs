@@ -187,6 +187,17 @@ public class CheckerController : ControllerBase
                     }
                 }
             }
+            else if (request.Status == ChecklistStatus.Approved || request.Status == ChecklistStatus.Rejected)
+            {
+                // Bulk update all documents if no specific updates
+                foreach (var category in dcl.Documents)
+                {
+                    foreach (var doc in category.DocList)
+                    {
+                        doc.CheckerStatus = request.Status == ChecklistStatus.Approved ? CheckerStatus.Approved : CheckerStatus.Rejected;
+                    }
+                }
+            }
 
             dcl.Status = request.Status;
 

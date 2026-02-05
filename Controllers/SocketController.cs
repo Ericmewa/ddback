@@ -90,8 +90,8 @@ public class SocketController : ControllerBase
             {
                 Id = Guid.NewGuid(),
                 Action = "force_logout",
-                PerformedBy = req.AdminId,
-                TargetUser = req.UserId,
+                PerformedById = req.AdminId,
+                TargetUserId = req.UserId,
                 Status = "success",
                 Resource = "socket",
                 Details = $"Admin {req.AdminId} forced logout of {req.UserId}",

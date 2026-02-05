@@ -5,6 +5,7 @@ using NCBA.DCL.Data;
 using NCBA.DCL.DTOs;
 using NCBA.DCL.Middleware;
 using NCBA.DCL.Models;
+using NCBA.DCL.Services;
 using System.Security.Claims;
 
 namespace NCBA.DCL.Controllers;
@@ -16,13 +17,16 @@ public class ExtensionController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
     private readonly ILogger<ExtensionController> _logger;
+    private readonly IEmailService _emailService;
 
     public ExtensionController(
         ApplicationDbContext context,
-        ILogger<ExtensionController> logger)
+        ILogger<ExtensionController> logger,
+        IEmailService emailService)
     {
         _context = context;
         _logger = logger;
+        _emailService = emailService;
     }
 
     // ================================
@@ -37,10 +41,20 @@ public class ExtensionController : ControllerBase
         try
         {
             var userId = Guid.Parse(User.FindFirst("id")?.Value ?? string.Empty);
+            var userName = User.FindFirst("name")?.Value ?? "User";
             
             var deferral = await _context.Deferrals.FindAsync(request.DeferralId);
             if (deferral == null)
                 return NotFound(new { message = "Deferral not found" });
+
+            if (deferral.Status != DeferralStatus.Approved)
+                return BadRequest(new { message = "Can only apply for extension on approved deferrals" });
+
+            if (deferral.DaysSought < 1)
+                return BadRequest(new { message = $"Deferral must have valid daysSought field (current value: {deferral.DaysSought})" });
+            
+            if (request.RequestedDaysSought <= deferral.DaysSought)
+                return BadRequest(new { message = $"Requested days ({request.RequestedDaysSought}) must be greater than current days ({deferral.DaysSought})" });
 
             // Create extension
             var extension = new Extension
@@ -54,21 +68,42 @@ public class ExtensionController : ControllerBase
                 RequestedDaysSought = request.RequestedDaysSought,
                 ExtensionReason = request.ExtensionReason,
                 RequestedById = userId,
+                RequestedByName = userName,
                 Status = ExtensionStatus.PendingApproval,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
 
+            // Handle Additional Files
+            if (request.AdditionalFiles != null && request.AdditionalFiles.Any())
+            {
+                foreach (var fileDto in request.AdditionalFiles)
+                {
+                    extension.AdditionalFiles.Add(new ExtensionFile
+                    {
+                        Name = fileDto.Name,
+                        Url = fileDto.Url,
+                        Size = fileDto.Size,
+                        UploadedAt = DateTime.UtcNow
+                    });
+                }
+            }
+
             // Copy approvers from deferral
             var deferralApprovers = await _context.Approvers
                 .Where(a => a.DeferralId == deferral.Id)
+                .Include(a => a.User)
                 .ToListAsync();
+
+            if (!deferralApprovers.Any())
+                return BadRequest(new { message = "Deferral must have approvers to create extension" });
 
             foreach (var approver in deferralApprovers)
             {
                 extension.Approvers.Add(new ExtensionApprover
                 {
                     UserId = approver.UserId,
+                    User = approver.User, // Ensure User is linked if available
                     Role = approver.Role,
                     ApprovalStatus = ApproverApprovalStatus.Pending,
                     IsCurrent = false
@@ -78,13 +113,45 @@ public class ExtensionController : ControllerBase
             // Set first approver as current
             if (extension.Approvers.Any())
             {
-                extension.Approvers.OrderBy(a => a.Id).First().IsCurrent = true;
+                var firstApprover = extension.Approvers.OrderBy(a => a.UserId).First(); // Or by some sequence if exists. Node uses array index. 
+                // Since EF order is not guaranteed without sort, but list order is usually preserved.
+                // Better to use index loop or just take first added.
+                extension.Approvers.First().IsCurrent = true;
             }
+
+            extension.History.Add(new ExtensionHistory
+            {
+                Action = "extension_requested",
+                UserId = userId,
+                UserName = userName,
+                UserRole = User.FindFirst(ClaimTypes.Role)?.Value,
+                Notes = $"Extension requested: {deferral.DaysSought} days -> {request.RequestedDaysSought} days"
+            });
 
             _context.Extensions.Add(extension);
             await _context.SaveChangesAsync();
 
-            // TODO: Send email notifications to first approver
+            // Send email notification to first approver
+            var currentApprover = extension.Approvers.FirstOrDefault(a => a.IsCurrent);
+            if (currentApprover != null && currentApprover.UserId.HasValue)
+            {
+                var approverUser = await _context.Users.FindAsync(currentApprover.UserId);
+                if (approverUser != null && !string.IsNullOrEmpty(approverUser.Email))
+                {
+                    try
+                    {
+                        await _emailService.SendExtensionApprovalRequestAsync(
+                            approverUser.Email, 
+                            approverUser.Name, 
+                            extension.DeferralNumber ?? "Unknown", 
+                            userName);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to send extension notification email");
+                    }
+                }
+            }
 
             return StatusCode(201, extension);
         }
@@ -108,6 +175,7 @@ public class ExtensionController : ControllerBase
                 .Include(e => e.Approvers).ThenInclude(a => a.User)
                 .Include(e => e.RequestedBy)
                 .Include(e => e.History).ThenInclude(h => h.User)
+                .Include(e => e.AdditionalFiles)
                 .Where(e => e.RequestedById == userId)
                 .OrderByDescending(e => e.CreatedAt)
                 .ToListAsync();

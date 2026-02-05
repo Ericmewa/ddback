@@ -79,6 +79,22 @@ public class Extension
     // Timestamps
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    // File Attachments
+    public ICollection<ExtensionFile> AdditionalFiles { get; set; } = new List<ExtensionFile>();
+}
+
+public class ExtensionFile
+{
+    public Guid Id { get; set; }
+
+    public Guid ExtensionId { get; set; }
+    public Extension? Extension { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+    public long Size { get; set; }
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
 }
 
 public class ExtensionApprover

@@ -23,6 +23,8 @@ public class DclSearchResponse
     public string DclNo { get; set; } = string.Empty;
     public string? CustomerName { get; set; }
     public string? CustomerNumber { get; set; }
+    public string? BusinessName { get; set; }
+    public string? LoanType { get; set; }
     public string Status { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
 }

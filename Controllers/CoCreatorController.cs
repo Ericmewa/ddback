@@ -285,11 +285,46 @@ public class CoCreatorController : ControllerBase
                 CustomerNumber = request.CustomerNumber,
                 CustomerName = request.CustomerName,
                 LoanType = request.LoanType,
+                IbpsNo = request.IbpsNo,
+                AssignedToRMId = request.AssignedToRMId,
                 CreatedById = userId,
-                Status = ChecklistStatus.Pending,
+                Status = ChecklistStatus.CoCreatorReview, // Initial status often not pending but review
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
+
+            // Handle documents if provided
+            if (request.Documents != null && request.Documents.Any())
+            {
+                foreach (var catDto in request.Documents)
+                {
+                    var category = new DocumentCategory
+                    {
+                        Id = Guid.NewGuid(),
+                        Category = catDto.Category,
+                        ChecklistId = checklist.Id
+                    };
+                    
+                    foreach (var docDto in catDto.DocList)
+                    {
+                        var doc = new Document
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = $"{category.Category} Document", // Or pass name from DTO if available
+                            Status = docDto.Status ?? DocumentStatus.PendingRM,
+                            FileUrl = docDto.FileUrl,
+                            Comment = docDto.Comment,
+                            DeferralReason = docDto.DeferralReason,
+                            DeferralNumber = docDto.DeferralNumber,
+                            CategoryId = category.Id,
+                            CreatedAt = DateTime.UtcNow,
+                            UpdatedAt = DateTime.UtcNow
+                        };
+                        category.DocList.Add(doc);
+                    }
+                    checklist.Documents.Add(category);
+                }
+            }
 
             _context.Checklists.Add(checklist);
             await _context.SaveChangesAsync();

@@ -16,6 +16,10 @@ public class Deferral
     public string? BusinessName { get; set; }
 
     public string? LoanType { get; set; }
+    
+    public int DaysSought { get; set; }
+    
+    public string? DclNumber { get; set; }
 
     public DeferralStatus Status { get; set; } = DeferralStatus.Pending;
 
@@ -71,7 +75,12 @@ public class Approver
 {
     public Guid Id { get; set; }
 
+    public Guid? UserId { get; set; }
+    public User? User { get; set; }
+
     public string? Name { get; set; }
+
+    public string? Role { get; set; }
 
     public bool Approved { get; set; } = false;
 

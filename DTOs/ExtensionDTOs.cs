@@ -8,6 +8,7 @@ public class CreateExtensionRequest
     public Guid DeferralId { get; set; }
     public int RequestedDaysSought { get; set; }
     public string ExtensionReason { get; set; } = string.Empty;
+    public List<ExtensionFileDto>? AdditionalFiles { get; set; }
 }
 
 // Extension Response
@@ -35,6 +36,7 @@ public class ExtensionResponse
     public string? CheckerApprovalComment { get; set; }
     public List<ExtensionHistoryDto> History { get; set; } = new();
     public List<ExtensionCommentDto> Comments { get; set; } = new();
+    public List<ExtensionFileDto> AdditionalFiles { get; set; } = new();
     public Guid RequestedById { get; set; }
     public string? RequestedByName { get; set; }
     public DateTime RequestedDate { get; set; }
@@ -97,4 +99,14 @@ public class ExtensionCommentDto
 public class AddExtensionCommentRequest
 {
     public string Text { get; set; } = string.Empty;
+}
+
+// Extension File DTO
+public class ExtensionFileDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+    public long Size { get; set; }
+    public DateTime UploadedAt { get; set; }
 }

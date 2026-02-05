@@ -1,8 +1,11 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NCBA.DCL.DTOs;
+using NCBA.DCL.Models;
 using NCBA.DCL.Services;
 using System;
+using System.Collections.Generic;
+using System.Text;
 using System.Threading.Tasks;
 
 namespace NCBA.DCL.Controllers
@@ -33,6 +36,7 @@ namespace NCBA.DCL.Controllers
         }
 
         [HttpPost("logs")]
+        [AllowAnonymous] // Might be needed for system logs or login failure logs
         public async Task<IActionResult> CreateLog([FromBody] AuditLogCreateDto dto)
         {
             var result = await _auditLogService.CreateLogAsync(dto);
@@ -43,9 +47,31 @@ namespace NCBA.DCL.Controllers
         public async Task<IActionResult> ExportLogs([FromQuery] string action = null, [FromQuery] Guid? userId = null, [FromQuery] string resource = null, [FromQuery] string status = null, [FromQuery] DateTime? startDate = null, [FromQuery] DateTime? endDate = null, [FromQuery] string search = null)
         {
             var result = await _auditLogService.ExportLogsAsync(action, userId, resource, status, startDate, endDate, search);
-            // CSV export logic (convert result.Body to CSV and return as file)
-            // For now, return as JSON
-            return StatusCode(result.StatusCode, result.Body);
+            
+            if (result.StatusCode != 200) return StatusCode(result.StatusCode, result.Body);
+
+            var logs = result.Body as IEnumerable<AuditLog>;
+            if (logs == null) return StatusCode(500, new { message = "Failed to export logs" });
+
+            var csv = new StringBuilder();
+            csv.AppendLine("createdAt,action,resource,status,performedBy.name,performedBy.email,targetUser.name,targetUser.email,details,errorMessage");
+
+            foreach (var log in logs)
+            {
+                csv.AppendLine($"{log.CreatedAt:yyyy-MM-dd HH:mm:ss}," +
+                               $"\"{log.Action}\"," +
+                               $"\"{log.Resource}\"," +
+                               $"\"{log.Status}\"," +
+                               $"\"{log.PerformedBy?.Name}\"," +
+                               $"\"{log.PerformedBy?.Email}\"," +
+                               $"\"{log.TargetUser?.Name}\"," +
+                               $"\"{log.TargetUser?.Email}\"," +
+                               $"\"{log.Details?.ToString().Replace("\"", "\"\"")}\"," +
+                               $"\"{log.ErrorMessage?.Replace("\"", "\"\"")}\"");
+            }
+
+            var bytes = Encoding.UTF8.GetBytes(csv.ToString());
+            return File(bytes, "text/csv", "audit-logs.csv");
         }
 
         [HttpGet("stats")]

@@ -23,6 +23,20 @@ public class User
 
     public bool Active { get; set; } = true;
 
+    public bool IsArchived { get; set; } = false;
+
+    public string? Position { get; set; }
+
+    public bool TasksReassigned { get; set; } = false;
+
+    public bool IsOnline { get; set; } = false;
+
+    public DateTime LastSeen { get; set; } = DateTime.UtcNow;
+
+    public DateTime? LoginTime { get; set; }
+
+    public string? SocketIds { get; set; } // Stored as JSON or comma-separated
+
     public string? CustomerNumber { get; set; }
 
     public string? CustomerId { get; set; }

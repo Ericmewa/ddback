@@ -7,10 +7,7 @@ namespace NCBA.DCL.Services
     public class AdminService : IAdminService
     {
         private readonly Data.ApplicationDbContext _db;
-        public AdminService(Data.ApplicationDbContext db)
-        {
-            _db = db;
-        }
+
 
         public async Task<(int StatusCode, object Body)> RegisterAdminAsync(RegisterAdminDto dto)
         {
@@ -145,8 +142,9 @@ namespace NCBA.DCL.Services
             var user = await _db.Users.FindAsync(userId);
             if (user == null)
                 return (404, new { message = "User not found" });
-            // Archive: set Active to false (C# model does not have isArchived, so use Active)
-            user.Active = false;
+            // Archive: set IsArchived to true (matches Node.js behavior)
+            user.IsArchived = true;
+            // Node.js does not explicitly set Active to false here, so we follow suit.
             await _db.SaveChangesAsync();
             return (200, new { message = "User archived" });
         }
@@ -169,7 +167,7 @@ namespace NCBA.DCL.Services
         {
             if (!Guid.TryParse(id, out var fromUserId))
                 return (400, new { message = "Invalid source user id" });
-            if (!Guid.TryParse(dto.NewAssigneeId, out var toUserId))
+            if (!Guid.TryParse(dto.ToUserId, out var toUserId))
                 return (400, new { message = "Invalid target user id" });
             var fromUser = await _db.Users.FindAsync(fromUserId);
             var toUser = await _db.Users.FindAsync(toUserId);
@@ -188,11 +186,11 @@ namespace NCBA.DCL.Services
                 deferrals++;
             }
 
-            // Extension: update CreatedById
-            var extensionList = _db.Extensions.Where(e => e.CreatedById == fromUserId);
+            // Extension: update RequestedById
+            var extensionList = _db.Extensions.Where(e => e.RequestedById == fromUserId);
             foreach (var e in extensionList)
             {
-                e.CreatedById = toUserId;
+                e.RequestedById = toUserId;
                 extensions++;
             }
 

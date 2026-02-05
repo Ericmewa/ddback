@@ -85,7 +85,47 @@ public class RMController : ControllerBase
                 return Forbid();
             }
 
-            // Update status to co-creator review
+            // 1. Update documents (RM only)
+            if (request.Documents != null && request.Documents.Any())
+            {
+                foreach (var docUpdate in request.Documents)
+                {
+                    // Find category and document
+                    var category = checklist.Documents.FirstOrDefault(c => c.Category == docUpdate.Category);
+                    if (category == null) continue;
+
+                    var doc = category.DocList.FirstOrDefault(d => d.Id == docUpdate.Id || d.Id == docUpdate._id); // Use provided ID
+                    if (doc == null) continue;
+
+                    if (docUpdate.Status.HasValue) doc.Status = docUpdate.Status.Value;
+                    if (docUpdate.RmStatus.HasValue) doc.RmStatus = docUpdate.RmStatus.Value;
+                    if (docUpdate.Comment != null) doc.Comment = docUpdate.Comment;
+                    if (docUpdate.FileUrl != null) doc.FileUrl = docUpdate.FileUrl;
+                    if (docUpdate.DeferralReason != null) doc.DeferralReason = docUpdate.DeferralReason;
+
+                    // Sync deferral number
+                    if (!string.IsNullOrWhiteSpace(docUpdate.DeferralNumber))
+                    {
+                        doc.DeferralNumber = docUpdate.DeferralNumber;
+                    }
+                }
+            }
+
+            // 2. RM general comment log
+            if (!string.IsNullOrEmpty(request.RmGeneralComment))
+            {
+                var commentLog = new ChecklistLog
+                {
+                    Id = Guid.NewGuid(),
+                    Message = $"RM Comment: {request.RmGeneralComment}",
+                    UserId = userId,
+                    ChecklistId = request.ChecklistId,
+                    Timestamp = DateTime.UtcNow
+                };
+                _context.ChecklistLogs.Add(commentLog);
+            }
+
+            // 3. Move checklist to Co-Creator
             checklist.Status = ChecklistStatus.CoCreatorReview;
 
             // Add log entry
@@ -98,6 +138,9 @@ public class RMController : ControllerBase
                 Timestamp = DateTime.UtcNow
             };
             _context.ChecklistLogs.Add(log);
+
+            // Audit
+            // TODO: Add audit log if service available
 
             // Create notification for co-creator
             if (checklist.CreatedById.HasValue)
@@ -119,7 +162,7 @@ public class RMController : ControllerBase
             return Ok(new
             {
                 message = "Checklist submitted to Co-Creator successfully",
-                status = checklist.Status.ToString()
+                checklist = checklist
             });
         }
         catch (Exception ex)
@@ -328,6 +371,80 @@ public class RMController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error marking notification as read");
+            return StatusCode(500, new { message = "Internal server error" });
+        }
+    }
+
+    // POST /api/rmChecklist/:id/supporting-docs
+    [HttpPost("{id}/supporting-docs")]
+    [RoleAuthorize(UserRole.RM)]
+    public async Task<IActionResult> UploadSupportingDocs(Guid id, [FromForm] List<IFormFile> files)
+    {
+        try
+        {
+            var userId = Guid.Parse(User.FindFirst("id")?.Value ?? string.Empty);
+            var checklist = await _context.Checklists.FindAsync(id);
+
+            if (checklist == null)
+            {
+                return NotFound(new { message = "Checklist not found" });
+            }
+
+            if (files == null || files.Count == 0)
+            {
+                return BadRequest(new { message = "No files uploaded" });
+            }
+
+            var uploadedDocs = new List<SupportingDoc>();
+
+            foreach (var file in files)
+            {
+                if (file.Length > 0)
+                {
+                    // In a real app, upload to storage (S3/Azure Blob) and get URL.
+                    // Here we assume a local or mocked URL pattern.
+                    var fileName = Guid.NewGuid().ToString() + Path.GetExtension(file.FileName);
+                    var filePath = Path.Combine("wwwroot", "uploads", fileName); // Ensure directory exists
+                    
+                    // Directory check
+                    var uploadDir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads");
+                    if (!Directory.Exists(uploadDir)) Directory.CreateDirectory(uploadDir);
+
+                    using (var stream = new FileStream(Path.Combine(uploadDir, fileName), FileMode.Create))
+                    {
+                        await file.CopyToAsync(stream);
+                    }
+
+                    var doc = new SupportingDoc
+                    {
+                        Id = Guid.NewGuid(),
+                        FileName = file.FileName,
+                        FileUrl = $"/uploads/{fileName}",
+                        FileSize = file.Length,
+                        FileType = file.ContentType,
+                        UploadedById = userId,
+                        UploadedByRole = "RM",
+                        UploadedAt = DateTime.UtcNow,
+                        ChecklistId = id
+                    };
+                    
+                    _context.SupportingDocs.Add(doc);
+                    uploadedDocs.Add(doc);
+                }
+            }
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = "Files uploaded successfully",
+                files = uploadedDocs,
+                checklist = checklist
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error uploading supporting docs");
             return StatusCode(500, new { message = "Internal server error" });
         }
     }

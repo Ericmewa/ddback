@@ -45,8 +45,32 @@ public class Checklist
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation properties
+    public string? IbpsNo { get; set; }
+    public string? Remarks { get; set; }
+    public string? CheckerComment { get; set; }
+
+    // Navigation properties
     public ICollection<DocumentCategory> Documents { get; set; } = new List<DocumentCategory>();
     public ICollection<ChecklistLog> Logs { get; set; } = new List<ChecklistLog>();
+    public ICollection<SupportingDoc> SupportingDocs { get; set; } = new List<SupportingDoc>();
+}
+
+public class SupportingDoc
+{
+    public Guid Id { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string FileUrl { get; set; } = string.Empty;
+    public long FileSize { get; set; }
+    public string? FileType { get; set; }
+    
+    public Guid? UploadedById { get; set; }
+    public User? UploadedBy { get; set; }
+    public string? UploadedByRole { get; set; }
+    
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+    
+    public Guid ChecklistId { get; set; }
+    public Checklist Checklist { get; set; } = null!;
 }
 
 public class ChecklistLog

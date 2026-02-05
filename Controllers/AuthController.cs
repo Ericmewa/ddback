@@ -94,6 +94,20 @@ public class AuthController : ControllerBase
 
             var token = _tokenGenerator.GenerateToken(user);
 
+            // Log login activity
+            var log = new UserLog
+            {
+                Id = Guid.NewGuid(),
+                Action = "LOGIN",
+                TargetUserId = user.Id,
+                TargetEmail = user.Email,
+                PerformedById = user.Id,
+                PerformedByEmail = user.Email,
+                Timestamp = DateTime.UtcNow
+            };
+            _context.UserLogs.Add(log);
+            await _context.SaveChangesAsync();
+
             return Ok(new LoginResponse
             {
                 Token = token,

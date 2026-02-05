@@ -10,9 +10,13 @@ public class AuditLog
     public string Action { get; set; } = string.Empty;
 
     public string? Resource { get; set; }
+    public string? ResourceId { get; set; }
     public string? Status { get; set; }
     public string? Details { get; set; }
     public string? ErrorMessage { get; set; }
+
+    public string? IpAddress { get; set; }
+    public string? UserAgent { get; set; }
 
     public Guid? PerformedById { get; set; }
     public User? PerformedBy { get; set; }
