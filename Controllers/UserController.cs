@@ -19,12 +19,14 @@ public class UserController : ControllerBase
     private readonly ApplicationDbContext _context;
     private readonly ILogger<UserController> _logger;
     private readonly IAdminService _adminService;
+    private readonly OnlineUserTracker _onlineUserTracker;
 
-    public UserController(ApplicationDbContext context, ILogger<UserController> logger, IAdminService adminService)
+    public UserController(ApplicationDbContext context, ILogger<UserController> logger, IAdminService adminService, OnlineUserTracker onlineUserTracker)
     {
         _context = context;
         _logger = logger;
         _adminService = adminService;
+        _onlineUserTracker = onlineUserTracker;
     }
 
     // ============================
@@ -37,34 +39,38 @@ public class UserController : ControllerBase
         return regex.IsMatch(password);
     }
 
-    [HttpPost]
+    [HttpPost("create")]
     [RoleAuthorize(UserRole.Admin)]
     public async Task<IActionResult> CreateUser([FromBody] CreateUserRequest request)
     {
         try
         {
             // Validate required fields
-            if (string.IsNullOrEmpty(request.Name) || string.IsNullOrEmpty(request.Email) || 
+            if (string.IsNullOrEmpty(request.Name) || string.IsNullOrEmpty(request.Email) ||
                 string.IsNullOrEmpty(request.Password)) // Role is enum, hard to be null/empty if binding works
             {
-                 return BadRequest(new { 
+                return BadRequest(new
+                {
                     message = "All fields are required: name, email, password, and role.",
-                    missingFields = new {
+                    missingFields = new
+                    {
                         name = string.IsNullOrEmpty(request.Name),
                         email = string.IsNullOrEmpty(request.Email),
                         password = string.IsNullOrEmpty(request.Password),
                         role = false // Enum default
                     }
-                 });
+                });
             }
 
             // Validate password strength
             if (!IsStrongPassword(request.Password))
             {
-                return BadRequest(new { 
+                return BadRequest(new
+                {
                     message = "Password must be at least 8 characters long and include an uppercase letter, lowercase letter, number, and special character.",
                     example = "Example: MyPass123!",
-                    requirements = new {
+                    requirements = new
+                    {
                         minLength = request.Password.Length >= 8,
                         hasUppercase = Regex.IsMatch(request.Password, "[A-Z]"),
                         hasLowercase = Regex.IsMatch(request.Password, "[a-z]"),
@@ -190,7 +196,7 @@ public class UserController : ControllerBase
         }
         catch (Exception ex)
         {
-             return StatusCode(500, new { error = ex.Message });
+            return StatusCode(500, new { error = ex.Message });
         }
     }
 
@@ -207,7 +213,7 @@ public class UserController : ControllerBase
                 query = query.Where(u => u.Name.ToLower().Contains(q) || (u.CustomerNumber != null && u.CustomerNumber.ToLower().Contains(q)));
             }
 
-            var customers = await query.Select(u => new 
+            var customers = await query.Select(u => new
             {
                 _id = u.Id,
                 name = u.Name,
@@ -231,7 +237,8 @@ public class UserController : ControllerBase
         {
             var customer = await _context.Users
                 .Where(u => u.Id == id)
-                .Select(u => new {
+                .Select(u => new
+                {
                     _id = u.Id,
                     name = u.Name,
                     email = u.Email,
@@ -287,34 +294,37 @@ public class UserController : ControllerBase
                 .ToListAsync();
             return Ok(rms);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-             return StatusCode(500, new { message = "Server error" });
+            return StatusCode(500, new { message = "Server error" });
         }
     }
 
     [HttpGet("online")]
-    public async Task<IActionResult> GetOnlineUsers()
+    public IActionResult GetOnlineUsers()
     {
         try
         {
-            var onlineUsers = await _context.Users
-                .Where(u => u.IsOnline)
-                .Select(u => new {
+            var onlineUsers = _onlineUserTracker.GetAll()
+                .Select(u => new
+                {
                     _id = u.Id,
                     name = u.Name,
                     email = u.Email,
-                    role = u.Role.ToString(),
+                    role = u.Role,
                     lastSeen = u.LastSeen,
                     loginTime = u.LoginTime,
-                    // socketCount = parsed from JSON or simple check
-                    ipAddress = "Server-tracked"
+                    currentPage = u.CurrentPage,
+                    ipAddress = u.IpAddress,
+                    userAgent = u.UserAgent,
+                    socketCount = u.SocketIds.Count
                 })
-                .ToListAsync();
+                .OrderBy(u => u.name)
+                .ToList();
 
             return Ok(new { success = true, count = onlineUsers.Count, users = onlineUsers });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             return StatusCode(500, new { success = false, message = "Failed to fetch online users" });
         }
@@ -326,7 +336,8 @@ public class UserController : ControllerBase
         try
         {
             var users = await _context.Users
-                .Select(u => new {
+                .Select(u => new
+                {
                     _id = u.Id,
                     name = u.Name,
                     email = u.Email,
@@ -336,13 +347,13 @@ public class UserController : ControllerBase
                     loginTime = u.LoginTime
                 })
                 .ToListAsync();
-            
+
             var onlineCount = users.Count(u => u.isOnline);
             return Ok(new { success = true, count = users.Count, onlineCount, users });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-             return StatusCode(500, new { success = false, message = "Failed to fetch users" });
+            return StatusCode(500, new { success = false, message = "Failed to fetch users" });
         }
     }
 
@@ -360,7 +371,7 @@ public class UserController : ControllerBase
 
             return Ok(new { success = true, message = "All users marked offline" });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             return StatusCode(500, new { success = false, message = "Failed to cleanup online users" });
         }
@@ -385,13 +396,13 @@ public class UserController : ControllerBase
             var performedById = Guid.Parse(User.FindFirst("id")?.Value ?? Guid.Empty.ToString());
             var log = new UserLog
             {
-                 Id = Guid.NewGuid(),
-                 Action = "TOGGLE_ACTIVE",
-                 TargetUserId = user.Id,
-                 TargetEmail = user.Email,
-                 PerformedById = performedById,
-                 PerformedByEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value,
-                 Timestamp = DateTime.UtcNow
+                Id = Guid.NewGuid(),
+                Action = "TOGGLE_ACTIVE",
+                TargetUserId = user.Id,
+                TargetEmail = user.Email,
+                PerformedById = performedById,
+                PerformedByEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value,
+                Timestamp = DateTime.UtcNow
             };
             _context.UserLogs.Add(log);
 
@@ -400,7 +411,7 @@ public class UserController : ControllerBase
         }
         catch (Exception ex)
         {
-             return StatusCode(500, new { error = ex.Message });
+            return StatusCode(500, new { error = ex.Message });
         }
     }
 
@@ -417,15 +428,15 @@ public class UserController : ControllerBase
 
             // Audit
             var performedById = Guid.Parse(User.FindFirst("id")?.Value ?? Guid.Empty.ToString());
-             var log = new UserLog
+            var log = new UserLog
             {
-                 Id = Guid.NewGuid(),
-                 Action = "CHANGE_ROLE",
-                 TargetUserId = user.Id,
-                 TargetEmail = user.Email,
-                 PerformedById = performedById,
-                 PerformedByEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value,
-                 Timestamp = DateTime.UtcNow
+                Id = Guid.NewGuid(),
+                Action = "CHANGE_ROLE",
+                TargetUserId = user.Id,
+                TargetEmail = user.Email,
+                PerformedById = performedById,
+                PerformedByEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value,
+                Timestamp = DateTime.UtcNow
             };
             _context.UserLogs.Add(log);
 
@@ -434,7 +445,7 @@ public class UserController : ControllerBase
         }
         catch (Exception ex)
         {
-             return StatusCode(500, new { error = ex.Message });
+            return StatusCode(500, new { error = ex.Message });
         }
     }
 
@@ -442,20 +453,21 @@ public class UserController : ControllerBase
     [RoleAuthorize(UserRole.Admin)]
     public async Task<IActionResult> ReassignTasks(Guid id, [FromBody] ReassignTasksDto dto)
     {
-         // Proxy to AdminService but ensure we handle route match
-         // _adminService expects string ID, returns tuple
-         var result = await _adminService.ReassignTasksAsync(id.ToString(), dto);
-         
-         // Log it? AdminService doesn't log it in UserLog? JS userController logs it.
-         // JS logs "REASSIGN_TASKS" to UserLog.
-         // AdminService might not log it to UserLog. Let's check. 
-         // AdminService DOES NOT log to UserLog. Node DOES.
-         // So I should log it here.
-         
-         if (result.StatusCode == 200)
-         {
-              var user = await _context.Users.FindAsync(id);
-              if (user != null) {
+        // Proxy to AdminService but ensure we handle route match
+        // _adminService expects string ID, returns tuple
+        var result = await _adminService.ReassignTasksAsync(id.ToString(), dto);
+
+        // Log it? AdminService doesn't log it in UserLog? JS userController logs it.
+        // JS logs "REASSIGN_TASKS" to UserLog.
+        // AdminService might not log it to UserLog. Let's check. 
+        // AdminService DOES NOT log to UserLog. Node DOES.
+        // So I should log it here.
+
+        if (result.StatusCode == 200)
+        {
+            var user = await _context.Users.FindAsync(id);
+            if (user != null)
+            {
                 var performedById = Guid.Parse(User.FindFirst("id")?.Value ?? Guid.Empty.ToString());
                 var log = new UserLog
                 {
@@ -470,10 +482,10 @@ public class UserController : ControllerBase
                 };
                 _context.UserLogs.Add(log);
                 await _context.SaveChangesAsync();
-              }
-         }
+            }
+        }
 
-         return StatusCode(result.StatusCode, result.Body);
+        return StatusCode(result.StatusCode, result.Body);
     }
 
     [HttpGet("{id}/activity")]
@@ -481,57 +493,83 @@ public class UserController : ControllerBase
     {
         try
         {
-             var auditLogs = await _context.AuditLogs
-                .Where(l => l.PerformedById == id)
-                .OrderByDescending(l => l.CreatedAt)
+            var auditLogs = await _context.AuditLogs
+               .Where(l => l.PerformedById == id)
+               .OrderByDescending(l => l.CreatedAt)
+               .Take(200)
+               .Select(l => new
+               {
+                   date = l.CreatedAt,
+                   action = l.Action,
+                   details = (string?)l.Details,
+                   status = l.Status ?? "success",
+                   performedBy = l.PerformedBy != null ? l.PerformedBy.Name : "System",
+                   target = l.TargetUser != null ? l.TargetUser.Name : (l.Resource != null ? $"Resource: {l.Resource}" : "N/A"),
+                   resource = (string?)l.Resource,
+                   type = "audit"
+               })
+               .ToListAsync();
+
+            var userLogs = await _context.UserLogs
+               .Where(l => l.TargetUserId == id || l.PerformedById == id)
+               .OrderByDescending(l => l.Timestamp)
+               .Take(50)
+               .Select(l => new
+               {
+                   date = l.Timestamp,
+                   action = l.Action,
+                   details = (string?)l.Action,
+                   status = "success",
+                   performedBy = l.PerformedBy != null ? l.PerformedBy.Name : (l.PerformedByEmail ?? "System"),
+                   target = l.TargetUser != null ? l.TargetUser.Name : (l.TargetEmail ?? "N/A"),
+                   resource = (string?)null,
+                   type = "log"
+               })
+               .ToListAsync();
+
+            // Combine and sort in memory
+            var allActivities = auditLogs
+                .Concat(userLogs)
+                .OrderByDescending(x => x.date)
                 .Take(200)
-                .Select(l => new {
-                    date = l.CreatedAt,
-                    action = l.Action,
-                    details = l.Details,
-                    status = l.Status ?? "success",
-                    performedBy = l.PerformedBy != null ? l.PerformedBy.Name : "System",
-                    target = l.TargetUser != null ? l.TargetUser.Name : (l.Resource != null ? $"Resource: {l.Resource}" : "N/A"),
-                    resource = l.Resource,
-                    // resourceId
-                })
-                .ToListAsync();
-
-             var userLogs = await _context.UserLogs
-                .Where(l => l.TargetUserId == id || l.PerformedById == id)
-                .OrderByDescending(l => l.Timestamp)
-                .Take(50)
-                .Select(l => new {
-                    date = l.Timestamp,
-                    action = l.Action,
-                    details = l.Action, // Format details logic needed
-                    status = "success",
-                    performedBy = l.PerformedBy != null ? l.PerformedBy.Name : (l.PerformedByEmail ?? "System"),
-                    target = l.TargetUser != null ? l.TargetUser.Name : (l.TargetEmail ?? "N/A")
-                })
-                .ToListAsync();
-
-             var allActivities = auditLogs.Cast<object>().Concat(userLogs.Cast<object>())
-                .OrderByDescending(x => (dynamic)x) // Dynamic sorting trick might fail, let's do in memory
                 .ToList();
-             
-             // Client side sort
-             var sorted = allActivities.OrderByDescending(x => {
-                 dynamic d = x;
-                 return (DateTime)d.date;
-             }).Take(200).ToList();
 
-             return Ok(new {
-                 success = true,
-                 count = sorted.Count,
-                 activities = sorted
-             });
+            return Ok(new
+            {
+                success = true,
+                count = allActivities.Count,
+                activities = allActivities
+            });
         }
         catch (Exception ex)
         {
-             _logger.LogError(ex, "Error getting activity");
-             return StatusCode(500, new { success = false, message = "Failed to fetch user activity" });
+            _logger.LogError(ex, "Error getting activity");
+            return StatusCode(500, new { success = false, message = "Failed to fetch user activity", error = ex.Message });
         }
+    }
+
+    [HttpPut("toggle/{id}")]
+    [RoleAuthorize(UserRole.Admin)]
+    public async Task<IActionResult> ToggleActiveAdmin(Guid id)
+    {
+        var result = await _adminService.ToggleActiveAsync(id.ToString());
+        return StatusCode(result.StatusCode, result.Body);
+    }
+
+    [HttpPut("archive/{id}")]
+    [RoleAuthorize(UserRole.Admin)]
+    public async Task<IActionResult> ArchiveUser(Guid id)
+    {
+        var result = await _adminService.ArchiveUserAsync(id.ToString());
+        return StatusCode(result.StatusCode, result.Body);
+    }
+
+    [HttpPut("transfer/{id}")]
+    [RoleAuthorize(UserRole.Admin)]
+    public async Task<IActionResult> TransferRole(Guid id, [FromBody] TransferRoleDto dto)
+    {
+        var result = await _adminService.TransferRoleAsync(id.ToString(), dto);
+        return StatusCode(result.StatusCode, result.Body);
     }
 }
 

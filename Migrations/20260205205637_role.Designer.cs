@@ -12,8 +12,8 @@ using NCBA.DCL.Data;
 namespace NCBA.DCL.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260128100210_AddAuditLog")]
-    partial class AddAuditLog
+    [Migration("20260205205637_role")]
+    partial class role
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -43,9 +43,17 @@ namespace NCBA.DCL.Migrations
                     b.Property<string>("Name")
                         .HasColumnType("longtext");
 
+                    b.Property<string>("Role")
+                        .HasColumnType("longtext");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("char(36)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("DeferralId");
+
+                    b.HasIndex("UserId");
 
                     b.ToTable("Approvers");
                 });
@@ -69,10 +77,16 @@ namespace NCBA.DCL.Migrations
                     b.Property<string>("ErrorMessage")
                         .HasColumnType("longtext");
 
+                    b.Property<string>("IpAddress")
+                        .HasColumnType("longtext");
+
                     b.Property<Guid?>("PerformedById")
                         .HasColumnType("char(36)");
 
                     b.Property<string>("Resource")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("ResourceId")
                         .HasColumnType("longtext");
 
                     b.Property<string>("Status")
@@ -80,6 +94,9 @@ namespace NCBA.DCL.Migrations
 
                     b.Property<Guid?>("TargetUserId")
                         .HasColumnType("char(36)");
+
+                    b.Property<string>("UserAgent")
+                        .HasColumnType("longtext");
 
                     b.HasKey("Id");
 
@@ -101,6 +118,9 @@ namespace NCBA.DCL.Migrations
 
                     b.Property<Guid?>("AssignedToRMId")
                         .HasColumnType("char(36)");
+
+                    b.Property<string>("CheckerComment")
+                        .HasColumnType("longtext");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
@@ -131,10 +151,16 @@ namespace NCBA.DCL.Migrations
                     b.Property<DateTime?>("DraftLastSaved")
                         .HasColumnType("datetime(6)");
 
+                    b.Property<string>("IbpsNo")
+                        .HasColumnType("longtext");
+
                     b.Property<bool>("IsDraft")
                         .HasColumnType("tinyint(1)");
 
                     b.Property<string>("LoanType")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("Remarks")
                         .HasColumnType("longtext");
 
                     b.Property<string>("Status")
@@ -228,6 +254,12 @@ namespace NCBA.DCL.Migrations
                         .HasColumnType("longtext");
 
                     b.Property<string>("CustomerNumber")
+                        .HasColumnType("longtext");
+
+                    b.Property<int>("DaysSought")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DclNumber")
                         .HasColumnType("longtext");
 
                     b.Property<string>("DeferralNumber")
@@ -371,6 +403,260 @@ namespace NCBA.DCL.Migrations
                     b.ToTable("DocumentCategories");
                 });
 
+            modelBuilder.Entity("NCBA.DCL.Models.Extension", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<bool>("AllApproversApproved")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("CheckerApprovalComment")
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTime?>("CheckerApprovalDate")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("CheckerApprovalStatus")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<Guid?>("CheckerApprovedById")
+                        .HasColumnType("char(36)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("CreatorApprovalComment")
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTime?>("CreatorApprovalDate")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("CreatorApprovalStatus")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<Guid?>("CreatorApprovedById")
+                        .HasColumnType("char(36)");
+
+                    b.Property<int>("CurrentApproverIndex")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CurrentDaysSought")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CustomerName")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("CustomerNumber")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("DclNumber")
+                        .HasColumnType("longtext");
+
+                    b.Property<Guid?>("DeferralId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("DeferralNumber")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("ExtensionReason")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("RejectedBy")
+                        .HasColumnType("longtext");
+
+                    b.Property<Guid?>("RejectedById")
+                        .HasColumnType("char(36)");
+
+                    b.Property<DateTime?>("RejectedDate")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("RejectionReason")
+                        .HasColumnType("longtext");
+
+                    b.Property<Guid>("RequestedById")
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("RequestedByName")
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTime>("RequestedDate")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("RequestedDaysSought")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReworkComments")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("ReworkRequestedBy")
+                        .HasColumnType("longtext");
+
+                    b.Property<Guid?>("ReworkRequestedById")
+                        .HasColumnType("char(36)");
+
+                    b.Property<DateTime?>("ReworkRequestedDate")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CheckerApprovedById");
+
+                    b.HasIndex("CreatorApprovedById");
+
+                    b.HasIndex("DeferralId");
+
+                    b.HasIndex("RequestedById");
+
+                    b.ToTable("Extensions");
+                });
+
+            modelBuilder.Entity("NCBA.DCL.Models.ExtensionApprover", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("ApprovalComment")
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTime?>("ApprovalDate")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("ApprovalStatus")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<Guid>("ExtensionId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<bool>("IsCurrent")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("Role")
+                        .HasColumnType("longtext");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("char(36)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExtensionId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("ExtensionApprovers");
+                });
+
+            modelBuilder.Entity("NCBA.DCL.Models.ExtensionComment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<Guid?>("AuthorId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<Guid>("ExtensionId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorId");
+
+                    b.HasIndex("ExtensionId");
+
+                    b.ToTable("ExtensionComments");
+                });
+
+            modelBuilder.Entity("NCBA.DCL.Models.ExtensionFile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<Guid>("ExtensionId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExtensionId");
+
+                    b.ToTable("ExtensionFiles");
+                });
+
+            modelBuilder.Entity("NCBA.DCL.Models.ExtensionHistory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("Comment")
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<Guid>("ExtensionId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("longtext");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("UserName")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("UserRole")
+                        .HasColumnType("longtext");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExtensionId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("ExtensionHistories");
+                });
+
             modelBuilder.Entity("NCBA.DCL.Models.Facility", b =>
                 {
                     b.Property<Guid>("Id")
@@ -427,6 +713,102 @@ namespace NCBA.DCL.Migrations
                     b.ToTable("Notifications");
                 });
 
+            modelBuilder.Entity("NCBA.DCL.Models.SupportingDoc", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<Guid>("ChecklistId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<long>("FileSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("FileType")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("FileUrl")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<Guid?>("UploadedById")
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("UploadedByRole")
+                        .HasColumnType("longtext");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChecklistId");
+
+                    b.HasIndex("UploadedById");
+
+                    b.ToTable("SupportingDocs");
+                });
+
+            modelBuilder.Entity("NCBA.DCL.Models.Upload", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("Category")
+                        .HasColumnType("longtext");
+
+                    b.Property<Guid?>("ChecklistId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<Guid?>("DocumentId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("DocumentName")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("FileName")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("FilePath")
+                        .HasColumnType("longtext");
+
+                    b.Property<long>("FileSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("FileType")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("FileUrl")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("Status")
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("UploadedBy")
+                        .HasColumnType("longtext");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChecklistId");
+
+                    b.HasIndex("DocumentId");
+
+                    b.ToTable("Uploads");
+                });
+
             modelBuilder.Entity("NCBA.DCL.Models.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -450,6 +832,18 @@ namespace NCBA.DCL.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("varchar(255)");
 
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<bool>("IsOnline")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<DateTime>("LastSeen")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime?>("LoginTime")
+                        .HasColumnType("datetime(6)");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -459,12 +853,21 @@ namespace NCBA.DCL.Migrations
                         .IsRequired()
                         .HasColumnType("longtext");
 
+                    b.Property<string>("Position")
+                        .HasColumnType("longtext");
+
                     b.Property<string>("RmId")
                         .HasColumnType("varchar(255)");
 
                     b.Property<string>("Role")
                         .IsRequired()
                         .HasColumnType("longtext");
+
+                    b.Property<string>("SocketIds")
+                        .HasColumnType("longtext");
+
+                    b.Property<bool>("TasksReassigned")
+                        .HasColumnType("tinyint(1)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
@@ -525,7 +928,13 @@ namespace NCBA.DCL.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("NCBA.DCL.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId");
+
                     b.Navigation("Deferral");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("NCBA.DCL.Models.AuditLog", b =>
@@ -653,6 +1062,103 @@ namespace NCBA.DCL.Migrations
                     b.Navigation("Checklist");
                 });
 
+            modelBuilder.Entity("NCBA.DCL.Models.Extension", b =>
+                {
+                    b.HasOne("NCBA.DCL.Models.User", "CheckerApprovedBy")
+                        .WithMany()
+                        .HasForeignKey("CheckerApprovedById")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("NCBA.DCL.Models.User", "CreatorApprovedBy")
+                        .WithMany()
+                        .HasForeignKey("CreatorApprovedById")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("NCBA.DCL.Models.Deferral", "Deferral")
+                        .WithMany()
+                        .HasForeignKey("DeferralId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("NCBA.DCL.Models.User", "RequestedBy")
+                        .WithMany()
+                        .HasForeignKey("RequestedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CheckerApprovedBy");
+
+                    b.Navigation("CreatorApprovedBy");
+
+                    b.Navigation("Deferral");
+
+                    b.Navigation("RequestedBy");
+                });
+
+            modelBuilder.Entity("NCBA.DCL.Models.ExtensionApprover", b =>
+                {
+                    b.HasOne("NCBA.DCL.Models.Extension", "Extension")
+                        .WithMany("Approvers")
+                        .HasForeignKey("ExtensionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("NCBA.DCL.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Extension");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("NCBA.DCL.Models.ExtensionComment", b =>
+                {
+                    b.HasOne("NCBA.DCL.Models.User", "Author")
+                        .WithMany()
+                        .HasForeignKey("AuthorId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("NCBA.DCL.Models.Extension", "Extension")
+                        .WithMany("Comments")
+                        .HasForeignKey("ExtensionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Author");
+
+                    b.Navigation("Extension");
+                });
+
+            modelBuilder.Entity("NCBA.DCL.Models.ExtensionFile", b =>
+                {
+                    b.HasOne("NCBA.DCL.Models.Extension", "Extension")
+                        .WithMany("AdditionalFiles")
+                        .HasForeignKey("ExtensionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Extension");
+                });
+
+            modelBuilder.Entity("NCBA.DCL.Models.ExtensionHistory", b =>
+                {
+                    b.HasOne("NCBA.DCL.Models.Extension", "Extension")
+                        .WithMany("History")
+                        .HasForeignKey("ExtensionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("NCBA.DCL.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Extension");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("NCBA.DCL.Models.Facility", b =>
                 {
                     b.HasOne("NCBA.DCL.Models.Deferral", "Deferral")
@@ -672,6 +1178,23 @@ namespace NCBA.DCL.Migrations
                         .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("NCBA.DCL.Models.SupportingDoc", b =>
+                {
+                    b.HasOne("NCBA.DCL.Models.Checklist", "Checklist")
+                        .WithMany("SupportingDocs")
+                        .HasForeignKey("ChecklistId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("NCBA.DCL.Models.User", "UploadedBy")
+                        .WithMany()
+                        .HasForeignKey("UploadedById");
+
+                    b.Navigation("Checklist");
+
+                    b.Navigation("UploadedBy");
                 });
 
             modelBuilder.Entity("NCBA.DCL.Models.UserLog", b =>
@@ -696,6 +1219,8 @@ namespace NCBA.DCL.Migrations
                     b.Navigation("Documents");
 
                     b.Navigation("Logs");
+
+                    b.Navigation("SupportingDocs");
                 });
 
             modelBuilder.Entity("NCBA.DCL.Models.Deferral", b =>
@@ -715,6 +1240,17 @@ namespace NCBA.DCL.Migrations
             modelBuilder.Entity("NCBA.DCL.Models.DocumentCategory", b =>
                 {
                     b.Navigation("DocList");
+                });
+
+            modelBuilder.Entity("NCBA.DCL.Models.Extension", b =>
+                {
+                    b.Navigation("AdditionalFiles");
+
+                    b.Navigation("Approvers");
+
+                    b.Navigation("Comments");
+
+                    b.Navigation("History");
                 });
 
             modelBuilder.Entity("NCBA.DCL.Models.User", b =>

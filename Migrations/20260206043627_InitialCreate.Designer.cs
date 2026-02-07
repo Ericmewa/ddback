@@ -12,8 +12,8 @@ using NCBA.DCL.Data;
 namespace NCBA.DCL.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260205120555_UpdateUserAndAuditModels")]
-    partial class UpdateUserAndAuditModels
+    [Migration("20260206043627_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)

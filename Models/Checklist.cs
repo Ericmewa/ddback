@@ -62,13 +62,13 @@ public class SupportingDoc
     public string FileUrl { get; set; } = string.Empty;
     public long FileSize { get; set; }
     public string? FileType { get; set; }
-    
+
     public Guid? UploadedById { get; set; }
     public User? UploadedBy { get; set; }
     public string? UploadedByRole { get; set; }
-    
+
     public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
-    
+
     public Guid ChecklistId { get; set; }
     public Checklist Checklist { get; set; } = null!;
 }

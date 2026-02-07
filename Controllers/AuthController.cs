@@ -8,7 +8,7 @@ using NCBA.DCL.Models;
 namespace NCBA.DCL.Controllers;
 
 [ApiController]
-[Route("api/auth")]
+[Route("api/admin/auth")]
 public class AuthController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
@@ -53,13 +53,13 @@ public class AuthController : ControllerBase
 
             return StatusCode(201, new
             {
-                message = "Admin registered",
-                admin = new
+                message = "Admin registered successfully",
+                user = new UserResponse
                 {
-                    id = admin.Id,
-                    name = admin.Name,
-                    email = admin.Email,
-                    role = admin.Role.ToString()
+                    Id = admin.Id,
+                    Name = admin.Name,
+                    Email = admin.Email,
+                    Role = admin.Role.ToString()
                 }
             });
         }
@@ -123,7 +123,7 @@ public class AuthController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during login");
-            return StatusCode(500, new { message = "Internal server error" });
+            return StatusCode(500, new { message = ex.Message, details = ex.ToString() });
         }
     }
 }

@@ -269,14 +269,18 @@ public class CoCreatorController : ControllerBase
         {
             var userId = Guid.Parse(User.FindFirst("id")?.Value ?? string.Empty);
 
-            // Generate DCL number
-            var lastChecklist = await _context.Checklists
+            // Generate DCL number with format YYYY-NNNN
+            var currentYear = DateTime.Now.Year;
+            var checklistsThisYear = await _context.Checklists
+                .Where(c => c.DclNo.StartsWith(currentYear.ToString()))
                 .OrderByDescending(c => c.CreatedAt)
-                .FirstOrDefaultAsync();
+                .ToListAsync();
 
-            var dclNo = lastChecklist == null
-                ? "DCL-000001"
-                : $"DCL-{DateTime.Now.Ticks.ToString().Substring(DateTime.Now.Ticks.ToString().Length - 6)}";
+            int sequenceNumber = checklistsThisYear.Count() + 1;
+            var dclNo = $"{currentYear}-{sequenceNumber:D4}";
+
+            _logger.LogInformation($"📋 Creating checklist: {dclNo}");
+            _logger.LogInformation($"📦 Request Documents Count: {request.Documents?.Count() ?? 0}");
 
             var checklist = new Checklist
             {
@@ -288,24 +292,31 @@ public class CoCreatorController : ControllerBase
                 IbpsNo = request.IbpsNo,
                 AssignedToRMId = request.AssignedToRMId,
                 CreatedById = userId,
-                Status = ChecklistStatus.CoCreatorReview, // Initial status often not pending but review
+                Status = ChecklistStatus.Pending, // Start as pending until submitted for review
                 CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
+                UpdatedAt = DateTime.UtcNow,
+                Documents = new List<DocumentCategory>(), // Initialize documents collection
+                Logs = new List<ChecklistLog>() // Initialize logs collection
             };
 
             // Handle documents if provided
             if (request.Documents != null && request.Documents.Any())
             {
+                _logger.LogInformation($"🔍 Processing {request.Documents.Count()} document categories");
+
                 foreach (var catDto in request.Documents)
                 {
+                    _logger.LogInformation($"  📁 Category: {catDto.Category}, DocList Count: {catDto.DocList?.Count() ?? 0}");
+
                     var category = new DocumentCategory
                     {
                         Id = Guid.NewGuid(),
                         Category = catDto.Category,
-                        ChecklistId = checklist.Id
+                        ChecklistId = checklist.Id,
+                        DocList = new List<Document>() // Initialize doc list
                     };
-                    
-                    foreach (var docDto in catDto.DocList)
+
+                    foreach (var docDto in catDto.DocList ?? new List<DocumentDto>())
                     {
                         var doc = new Document
                         {
@@ -321,30 +332,94 @@ public class CoCreatorController : ControllerBase
                             UpdatedAt = DateTime.UtcNow
                         };
                         category.DocList.Add(doc);
+                        _logger.LogInformation($"    ✅ Added doc: {doc.Name} (Status: {doc.Status})");
                     }
                     checklist.Documents.Add(category);
+                    _logger.LogInformation($"  ✔️ Category {catDto.Category} added with {category.DocList.Count} documents");
                 }
+            }
+            else
+            {
+                _logger.LogWarning($"⚠️ No documents provided in request");
+            }
+
+            _logger.LogInformation($"📊 Checklist before save - Documents count: {checklist.Documents.Count}");
+            foreach (var doc in checklist.Documents)
+            {
+                _logger.LogInformation($"   Category: {doc.Category}, Docs: {doc.DocList.Count}");
             }
 
             _context.Checklists.Add(checklist);
             await _context.SaveChangesAsync();
+
+            _logger.LogInformation($"✅ Checklist saved to DB: {checklist.Id}");
+            _logger.LogInformation($"🔐 AssignedToRMId: {checklist.AssignedToRMId}");
+
+            // Reload the checklist with all related data
+            var createdChecklist = await _context.Checklists
+                .Include(c => c.CreatedBy)
+                .Include(c => c.AssignedToRM)
+                .Include(c => c.AssignedToCoChecker)
+                .Include(c => c.Documents)
+                    .ThenInclude(dc => dc.DocList)
+                .Include(c => c.Logs)
+                    .ThenInclude(l => l.User)
+                .FirstOrDefaultAsync(c => c.Id == checklist.Id);
+
+            _logger.LogInformation($"📖 Checklist retrieved after save - Documents count: {createdChecklist.Documents.Count}");
+            _logger.LogInformation($"👤 RM Loaded: {(createdChecklist.AssignedToRM != null ? createdChecklist.AssignedToRM.Name : "NULL")}");
+            foreach (var doc in createdChecklist.Documents)
+            {
+                _logger.LogInformation($"   Category: {doc.Category}, Docs: {doc.DocList.Count}");
+            }
+
+            // Debug: Log RM assignment info
+            _logger.LogInformation($"🔍 DEBUG: AssignedToRMId = {createdChecklist.AssignedToRMId}");
+            _logger.LogInformation($"🔍 DEBUG: AssignedToRM is null = {createdChecklist.AssignedToRM == null}");
+            if (createdChecklist.AssignedToRM != null)
+            {
+                _logger.LogInformation($"🔍 DEBUG: RM ID = {createdChecklist.AssignedToRM.Id}, RM Name = {createdChecklist.AssignedToRM.Name}");
+            }
 
             return StatusCode(201, new
             {
                 message = "Checklist created successfully",
                 checklist = new
                 {
-                    id = checklist.Id,
-                    dclNo = checklist.DclNo,
-                    customerNumber = checklist.CustomerNumber,
-                    customerName = checklist.CustomerName,
-                    status = checklist.Status.ToString()
+                    id = createdChecklist.Id,
+                    dclNo = createdChecklist.DclNo,
+                    customerNumber = createdChecklist.CustomerNumber,
+                    customerName = createdChecklist.CustomerName,
+                    loanType = createdChecklist.LoanType,
+                    ibpsNo = createdChecklist.IbpsNo,
+                    status = createdChecklist.Status.ToString(),
+                    assignedToRMId = createdChecklist.AssignedToRMId,
+                    assignedToRM = createdChecklist.AssignedToRM != null ? new
+                    {
+                        id = createdChecklist.AssignedToRM.Id,
+                        name = createdChecklist.AssignedToRM.Name
+                    } : null,
+                    documents = createdChecklist.Documents.Select(dc => new
+                    {
+                        id = dc.Id,
+                        category = dc.Category,
+                        docList = dc.DocList.Select(d => new
+                        {
+                            id = d.Id,
+                            name = d.Name,
+                            status = d.Status.ToString().ToLower(),
+                            fileUrl = d.FileUrl,
+                            comment = d.Comment
+                        }).ToList()
+                    }).ToList(),
+                    createdAt = createdChecklist.CreatedAt,
+                    updatedAt = createdChecklist.UpdatedAt
                 }
             });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error creating checklist");
+            _logger.LogError(ex, "❌ Error creating checklist");
             return StatusCode(500, new { message = "Internal server error" });
         }
     }
@@ -359,7 +434,10 @@ public class CoCreatorController : ControllerBase
                 .Include(c => c.CreatedBy)
                 .Include(c => c.AssignedToRM)
                 .Include(c => c.AssignedToCoChecker)
+                .Include(c => c.Documents)
+                    .ThenInclude(dc => dc.DocList)
                 .OrderByDescending(c => c.CreatedAt)
+                .ThenByDescending(c => c.Id)
                 .Select(c => new
                 {
                     id = c.Id,
@@ -367,10 +445,25 @@ public class CoCreatorController : ControllerBase
                     customerNumber = c.CustomerNumber,
                     customerName = c.CustomerName,
                     loanType = c.LoanType,
+                    ibpsNo = c.IbpsNo,
                     status = c.Status.ToString(),
+                    assignedToRMId = c.AssignedToRMId,
                     createdBy = c.CreatedBy != null ? new { id = c.CreatedBy.Id, name = c.CreatedBy.Name } : null,
                     assignedToRM = c.AssignedToRM != null ? new { id = c.AssignedToRM.Id, name = c.AssignedToRM.Name } : null,
                     assignedToCoChecker = c.AssignedToCoChecker != null ? new { id = c.AssignedToCoChecker.Id, name = c.AssignedToCoChecker.Name } : null,
+                    documents = c.Documents.Select(dc => new
+                    {
+                        id = dc.Id,
+                        category = dc.Category,
+                        docList = dc.DocList.Select(d => new
+                        {
+                            id = d.Id,
+                            name = d.Name,
+                            status = d.Status.ToString().ToLower(),
+                            fileUrl = d.FileUrl,
+                            comment = d.Comment
+                        }).ToList()
+                    }).ToList(),
                     createdAt = c.CreatedAt,
                     updatedAt = c.UpdatedAt
                 })
@@ -391,6 +484,8 @@ public class CoCreatorController : ControllerBase
     {
         try
         {
+            _logger.LogInformation($"🔍 Fetching checklist: {id}");
+
             var checklist = await _context.Checklists
                 .Include(c => c.CreatedBy)
                 .Include(c => c.AssignedToRM)
@@ -404,24 +499,74 @@ public class CoCreatorController : ControllerBase
 
             if (checklist == null)
             {
+                _logger.LogWarning($"❌ Checklist not found: {id}");
                 return NotFound(new { message = "Checklist not found" });
             }
 
-            return Ok(checklist);
+            _logger.LogInformation($"✅ Found checklist: {checklist.DclNo}, IBPS: {checklist.IbpsNo}, RM: {checklist.AssignedToRM?.Name}, Docs: {checklist.Documents.Count}");
+
+            return Ok(new
+            {
+                id = checklist.Id,
+                dclNo = checklist.DclNo,
+                customerNumber = checklist.CustomerNumber,
+                customerName = checklist.CustomerName,
+                loanType = checklist.LoanType,
+                ibpsNo = checklist.IbpsNo,
+                status = checklist.Status.ToString(),
+                assignedToRMId = checklist.AssignedToRMId,
+                createdBy = checklist.CreatedBy != null ? new { id = checklist.CreatedBy.Id, name = checklist.CreatedBy.Name } : null,
+                assignedToRM = checklist.AssignedToRM != null ? new { id = checklist.AssignedToRM.Id, name = checklist.AssignedToRM.Name } : null,
+                assignedToCoChecker = checklist.AssignedToCoChecker != null ? new { id = checklist.AssignedToCoChecker.Id, name = checklist.AssignedToCoChecker.Name } : null,
+                documents = checklist.Documents.Select(dc => new
+                {
+                    id = dc.Id,
+                    category = dc.Category,
+                    docList = dc.DocList.Select(d => new
+                    {
+                        id = d.Id,
+                        name = d.Name,
+                        status = d.Status.ToString().ToLower(),
+                        fileUrl = d.FileUrl,
+                        comment = d.Comment,
+                        deferralReason = d.DeferralReason,
+                        deferralNumber = d.DeferralNumber,
+                        coCreatorFiles = (d.CoCreatorFiles ?? new List<CoCreatorFile>()).Select(cf => new
+                        {
+                            id = cf.Id,
+                            url = cf.Url,
+                            name = cf.Name
+                        }).ToList()
+                    }).ToList()
+                }).ToList(),
+                logs = checklist.Logs.Select(l => new
+                {
+                    id = l.Id,
+                    message = l.Message,
+                    user = l.User != null ? new { id = l.User.Id, name = l.User.Name } : null,
+                    timestamp = l.Timestamp
+                }).ToList(),
+                createdAt = checklist.CreatedAt,
+                updatedAt = checklist.UpdatedAt
+            });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching checklist");
+            _logger.LogError(ex, "❌ Error fetching checklist");
             return StatusCode(500, new { message = "Internal server error" });
         }
     }
 
+    // GET /api/cocreatorChecklist/dcl/:dclNo
+    // [HttpGet("dcl/{dclNo}")]
     // GET /api/cocreatorChecklist/dcl/:dclNo
     [HttpGet("dcl/{dclNo}")]
     public async Task<IActionResult> GetChecklistByDclNo(string dclNo)
     {
         try
         {
+            _logger.LogInformation($"🔍 Fetching checklist by DCL: {dclNo}");
+
             var checklist = await _context.Checklists
                 .Include(c => c.CreatedBy)
                 .Include(c => c.AssignedToRM)
@@ -432,14 +577,45 @@ public class CoCreatorController : ControllerBase
 
             if (checklist == null)
             {
+                _logger.LogWarning($"❌ Checklist not found: {dclNo}");
                 return NotFound(new { message = "Checklist not found" });
             }
 
-            return Ok(checklist);
+            _logger.LogInformation($"✅ Found checklist: {checklist.DclNo}, IBPS: {checklist.IbpsNo}, RM: {checklist.AssignedToRM?.Name}, Docs: {checklist.Documents.Count}");
+
+            return Ok(new
+            {
+                id = checklist.Id,
+                dclNo = checklist.DclNo,
+                customerNumber = checklist.CustomerNumber,
+                customerName = checklist.CustomerName,
+                loanType = checklist.LoanType,
+                ibpsNo = checklist.IbpsNo,
+                status = checklist.Status.ToString(),
+                assignedToRMId = checklist.AssignedToRMId,
+                createdBy = checklist.CreatedBy != null ? new { id = checklist.CreatedBy.Id, name = checklist.CreatedBy.Name } : null,
+                assignedToRM = checklist.AssignedToRM != null ? new { id = checklist.AssignedToRM.Id, name = checklist.AssignedToRM.Name } : null,
+                assignedToCoChecker = checklist.AssignedToCoChecker != null ? new { id = checklist.AssignedToCoChecker.Id, name = checklist.AssignedToCoChecker.Name } : null,
+                documents = checklist.Documents.Select(dc => new
+                {
+                    id = dc.Id,
+                    category = dc.Category,
+                    docList = dc.DocList.Select(d => new
+                    {
+                        id = d.Id,
+                        name = d.Name,
+                        status = d.Status.ToString().ToLower(),
+                        fileUrl = d.FileUrl,
+                        comment = d.Comment
+                    }).ToList()
+                }).ToList(),
+                createdAt = checklist.CreatedAt,
+                updatedAt = checklist.UpdatedAt
+            });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching checklist by DCL number");
+            _logger.LogError(ex, "❌ Error fetching checklist by DCL number");
             return StatusCode(500, new { message = "Internal server error" });
         }
     }
@@ -552,7 +728,38 @@ public class CoCreatorController : ControllerBase
                 .Where(c => c.CreatedById == creatorId)
                 .Include(c => c.AssignedToRM)
                 .Include(c => c.AssignedToCoChecker)
+                .Include(c => c.Documents)
+                    .ThenInclude(dc => dc.DocList)
                 .OrderByDescending(c => c.CreatedAt)
+                .ThenByDescending(c => c.Id)
+                .Select(c => new
+                {
+                    id = c.Id,
+                    dclNo = c.DclNo,
+                    customerNumber = c.CustomerNumber,
+                    customerName = c.CustomerName,
+                    loanType = c.LoanType,
+                    ibpsNo = c.IbpsNo,
+                    status = c.Status.ToString(),
+                    assignedToRMId = c.AssignedToRMId,
+                    createdAt = c.CreatedAt,
+                    updatedAt = c.UpdatedAt,
+                    assignedToRM = c.AssignedToRM != null ? new { id = c.AssignedToRM.Id, name = c.AssignedToRM.Name } : null,
+                    assignedToCoChecker = c.AssignedToCoChecker != null ? new { id = c.AssignedToCoChecker.Id, name = c.AssignedToCoChecker.Name } : null,
+                    documents = c.Documents.Select(dc => new
+                    {
+                        id = dc.Id,
+                        category = dc.Category,
+                        docList = dc.DocList.Select(d => new
+                        {
+                            id = d.Id,
+                            name = d.Name,
+                            status = d.Status.ToString().ToLower(),
+                            fileUrl = d.FileUrl,
+                            comment = d.Comment
+                        }).ToList()
+                    }).ToList()
+                })
                 .ToListAsync();
 
             return Ok(checklists);
