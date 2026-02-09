@@ -16,14 +16,20 @@ public class Deferral
     public string? BusinessName { get; set; }
 
     public string? LoanType { get; set; }
-    
+
     public int DaysSought { get; set; }
-    
+
     public string? DclNumber { get; set; }
 
     public DeferralStatus Status { get; set; } = DeferralStatus.Pending;
 
     public string? RejectionReason { get; set; }
+
+    public string? DeferralDescription { get; set; }
+
+    public string? ReworkComments { get; set; }
+
+    public string? ClosedReason { get; set; }
 
     public int CurrentApproverIndex { get; set; } = 0;
 
@@ -93,6 +99,8 @@ public class Approver
 public enum DeferralStatus
 {
     Pending,
+    InReview,
     Approved,
-    Rejected
+    Rejected,
+    ReturnedForRework
 }

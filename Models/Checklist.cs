@@ -44,10 +44,15 @@ public class Checklist
 
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
+    // Track who last updated the checklist
+    public Guid? LastUpdatedBy { get; set; }
+
     // Navigation properties
     public string? IbpsNo { get; set; }
     public string? Remarks { get; set; }
     public string? CheckerComment { get; set; }
+    public string? FinalComment { get; set; }
+    public bool SubmittedToCoChecker { get; set; } = false;
 
     // Navigation properties
     public ICollection<DocumentCategory> Documents { get; set; } = new List<DocumentCategory>();

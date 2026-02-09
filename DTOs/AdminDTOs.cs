@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace NCBA.DCL.DTOs
 {
     public class RegisterAdminDto
@@ -29,5 +31,17 @@ namespace NCBA.DCL.DTOs
     public class ReassignTasksDto
     {
         public string ToUserId { get; set; }
+    }
+
+    public class IdResponseDto
+    {
+        [JsonPropertyName("id")]
+        public Guid? Id { get; set; }
+
+        [JsonPropertyName("_id")]
+        public Guid? _id { get; set; }
+
+        // Helper property
+        public Guid? DocumentId => Id ?? _id;
     }
 }

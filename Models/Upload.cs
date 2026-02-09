@@ -16,6 +16,8 @@ public class Upload
     public string? FilePath { get; set; }
     public string? FileUrl { get; set; }
 
+    public byte[]? FileData { get; set; } // Store file as binary in database
+
     public long FileSize { get; set; }
     public string? FileType { get; set; }
 

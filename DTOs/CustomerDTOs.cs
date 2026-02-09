@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace NCBA.DCL.DTOs;
 
 // Customer Search Request

@@ -1,4 +1,5 @@
 using NCBA.DCL.Models;
+using System.Text.Json.Serialization;
 
 namespace NCBA.DCL.DTOs;
 

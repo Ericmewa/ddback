@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NCBA.DCL.Data;
 
@@ -11,9 +12,11 @@ using NCBA.DCL.Data;
 namespace NCBA.DCL.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260209134536_AddLastUpdatedByToChecklist")]
+    partial class AddLastUpdatedByToChecklist
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -247,9 +250,6 @@ namespace NCBA.DCL.Migrations
                     b.Property<string>("BusinessName")
                         .HasColumnType("longtext");
 
-                    b.Property<string>("ClosedReason")
-                        .HasColumnType("longtext");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
@@ -271,9 +271,6 @@ namespace NCBA.DCL.Migrations
                     b.Property<string>("DclNumber")
                         .HasColumnType("longtext");
 
-                    b.Property<string>("DeferralDescription")
-                        .HasColumnType("longtext");
-
                     b.Property<string>("DeferralNumber")
                         .IsRequired()
                         .HasColumnType("varchar(255)");
@@ -282,9 +279,6 @@ namespace NCBA.DCL.Migrations
                         .HasColumnType("longtext");
 
                     b.Property<string>("RejectionReason")
-                        .HasColumnType("longtext");
-
-                    b.Property<string>("ReworkComments")
                         .HasColumnType("longtext");
 
                     b.Property<string>("Status")

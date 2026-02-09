@@ -39,15 +39,12 @@ public class UploadsController : ControllerBase
             var documentName = dto.DocumentName ?? dto.File.FileName;
             var category = dto.Category;
 
-            var uploadsDir = Path.Combine(_env.ContentRootPath, "uploads");
-            if (!Directory.Exists(uploadsDir)) Directory.CreateDirectory(uploadsDir);
-
-            var uniqueName = $"{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}-{Guid.NewGuid()}{Path.GetExtension(dto.File.FileName)}";
-            var filePath = Path.Combine(uploadsDir, uniqueName);
-
-            await using (var stream = System.IO.File.Create(filePath))
+            // Read file as binary
+            byte[] fileData;
+            using (var stream = new MemoryStream())
             {
                 await dto.File.CopyToAsync(stream);
+                fileData = stream.ToArray();
             }
 
             var upload = new Upload
@@ -58,8 +55,9 @@ public class UploadsController : ControllerBase
                 DocumentName = documentName,
                 Category = category,
                 FileName = dto.File.FileName,
-                FilePath = $"/uploads/{uniqueName}",
-                FileUrl = $"/uploads/{uniqueName}",
+                FileData = fileData, // Store binary data in database
+                FilePath = null, // No longer using filesystem
+                FileUrl = null, // Will be set after saving
                 FileSize = dto.File.Length,
                 FileType = dto.File.ContentType,
                 UploadedBy = User?.Identity?.Name ?? "RM",
@@ -69,6 +67,11 @@ public class UploadsController : ControllerBase
             };
 
             _context.Uploads.Add(upload);
+            await _context.SaveChangesAsync();
+
+            // Set the fileUrl with the actual upload ID
+            upload.FileUrl = $"/api/uploads/{upload.Id}";
+            _context.Uploads.Update(upload);
             await _context.SaveChangesAsync();
 
             return StatusCode(201, new
@@ -95,6 +98,28 @@ public class UploadsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Upload error");
+            return StatusCode(500, new { success = false, error = ex.Message });
+        }
+    }
+
+    [HttpGet("{id}")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetById(Guid id)
+    {
+        try
+        {
+            var upload = await _context.Uploads.FindAsync(id);
+            if (upload == null) return NotFound(new { success = false, error = "File not found" });
+
+            if (upload.FileData == null || upload.FileData.Length == 0)
+                return NotFound(new { success = false, error = "File data not found" });
+
+            // Return file as binary with appropriate content type
+            return File(upload.FileData, upload.FileType ?? "application/octet-stream", upload.FileName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Get file error");
             return StatusCode(500, new { success = false, error = ex.Message });
         }
     }

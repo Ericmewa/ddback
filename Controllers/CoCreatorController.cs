@@ -1,26 +1,36 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using NCBA.DCL.Data;
-using NCBA.DCL.DTOs;
-using NCBA.DCL.Helpers;
-using NCBA.DCL.Middleware;
 using NCBA.DCL.Models;
+using NCBA.DCL.Services;
+using NCBA.DCL.Helpers;
 
 namespace NCBA.DCL.Controllers;
 
 [ApiController]
 [Route("api/cocreatorChecklist")]
 [Authorize]
-
-
-
 public class CoCreatorController : ControllerBase
 {
+    private readonly ApplicationDbContext _context;
+    private readonly ILogger<CoCreatorController> _logger;
+    private readonly IEmailService _emailService;
+    private readonly IWebHostEnvironment _environment;
 
-    // GET /api/cocreatorChecklist/{id}/draft
+    public CoCreatorController(
+        ApplicationDbContext context,
+        ILogger<CoCreatorController> logger,
+        IEmailService emailService,
+        IWebHostEnvironment environment)
+    {
+        _context = context;
+        _logger = logger;
+        _emailService = emailService;
+        _environment = environment;
+    }
     [HttpGet("{id}/draft")]
-    [RoleAuthorize(UserRole.CoCreator)]
+
     public async Task<IActionResult> GetChecklistDraft(Guid id)
     {
         try
@@ -46,7 +56,6 @@ public class CoCreatorController : ControllerBase
 
     // POST /api/cocreatorChecklist/save-draft
     [HttpPost("save-draft")]
-    [RoleAuthorize(UserRole.CoCreator)]
     public async Task<IActionResult> SaveChecklistDraft([FromBody] SaveChecklistDraftRequest request)
     {
         try
@@ -97,7 +106,6 @@ public class CoCreatorController : ControllerBase
 
     // PATCH /api/cocreatorChecklist/{id}/update-status-with-docs
     [HttpPatch("{id}/update-status-with-docs")]
-    [RoleAuthorize(UserRole.CoCreator)]
     public async Task<IActionResult> UpdateChecklistStatusWithDocs(Guid id, [FromBody] UpdateChecklistWithDocsRequest request)
     {
         try
@@ -121,7 +129,8 @@ public class CoCreatorController : ControllerBase
                     if (cat == null) continue;
                     foreach (var docUpdate in updatedCat.DocList)
                     {
-                        var doc = cat.DocList.FirstOrDefault(d => d.Id == docUpdate.Id);
+                        var docId = docUpdate.DocumentId ?? docUpdate.Id;
+                        var doc = cat.DocList.FirstOrDefault(d => d.Id == docId);
                         if (doc == null) continue;
                         if (docUpdate.FileUrl != null) doc.FileUrl = docUpdate.FileUrl;
                         if (docUpdate.Comment != null) doc.Comment = docUpdate.Comment;
@@ -159,23 +168,9 @@ public class CoCreatorController : ControllerBase
             return StatusCode(500, new { message = "Internal server error" });
         }
     }
-    private readonly ApplicationDbContext _context;
-    private readonly ILogger<CoCreatorController> _logger;
-    private readonly IWebHostEnvironment _environment;
-
-    public CoCreatorController(
-        ApplicationDbContext context,
-        ILogger<CoCreatorController> logger,
-        IWebHostEnvironment environment)
-    {
-        _context = context;
-        _logger = logger;
-        _environment = environment;
-    }
 
     // POST /api/cocreatorChecklist/{id}/revive
     [HttpPost("{id}/revive")]
-    [RoleAuthorize(UserRole.CoCreator)]
     public async Task<IActionResult> ReviveChecklist(Guid id)
     {
         try
@@ -262,7 +257,6 @@ public class CoCreatorController : ControllerBase
 
     // POST /api/cocreatorChecklist
     [HttpPost]
-    [RoleAuthorize(UserRole.CoCreator)]
     public async Task<IActionResult> CreateChecklist([FromBody] CreateChecklistRequest request)
     {
         try
@@ -279,8 +273,8 @@ public class CoCreatorController : ControllerBase
             int sequenceNumber = checklistsThisYear.Count() + 1;
             var dclNo = $"{currentYear}-{sequenceNumber:D4}";
 
-            _logger.LogInformation($"📋 Creating checklist: {dclNo}");
-            _logger.LogInformation($"📦 Request Documents Count: {request.Documents?.Count() ?? 0}");
+            _logger.LogInformation($"?? Creating checklist: {dclNo}");
+            _logger.LogInformation($"?? Request Documents Count: {request.Documents?.Count() ?? 0}");
 
             var checklist = new Checklist
             {
@@ -302,11 +296,11 @@ public class CoCreatorController : ControllerBase
             // Handle documents if provided
             if (request.Documents != null && request.Documents.Any())
             {
-                _logger.LogInformation($"🔍 Processing {request.Documents.Count()} document categories");
+                _logger.LogInformation($"?? Processing {request.Documents.Count()} document categories");
 
                 foreach (var catDto in request.Documents)
                 {
-                    _logger.LogInformation($"  📁 Category: {catDto.Category}, DocList Count: {catDto.DocList?.Count() ?? 0}");
+                    _logger.LogInformation($"  ?? Category: {catDto.Category}, DocList Count: {catDto.DocList?.Count() ?? 0}");
 
                     var category = new DocumentCategory
                     {
@@ -316,13 +310,13 @@ public class CoCreatorController : ControllerBase
                         DocList = new List<Document>() // Initialize doc list
                     };
 
-                    foreach (var docDto in catDto.DocList ?? new List<DocumentDto>())
+                    foreach (var docDto in catDto.DocList ?? new List<Document>())
                     {
                         var doc = new Document
                         {
                             Id = Guid.NewGuid(),
                             Name = $"{category.Category} Document", // Or pass name from DTO if available
-                            Status = docDto.Status ?? DocumentStatus.PendingRM,
+                            Status = docDto.Status,
                             FileUrl = docDto.FileUrl,
                             Comment = docDto.Comment,
                             DeferralReason = docDto.DeferralReason,
@@ -332,18 +326,18 @@ public class CoCreatorController : ControllerBase
                             UpdatedAt = DateTime.UtcNow
                         };
                         category.DocList.Add(doc);
-                        _logger.LogInformation($"    ✅ Added doc: {doc.Name} (Status: {doc.Status})");
+                        _logger.LogInformation($"    ? Added doc: {doc.Name} (Status: {doc.Status})");
                     }
                     checklist.Documents.Add(category);
-                    _logger.LogInformation($"  ✔️ Category {catDto.Category} added with {category.DocList.Count} documents");
+                    _logger.LogInformation($"  ?? Category {catDto.Category} added with {category.DocList.Count} documents");
                 }
             }
             else
             {
-                _logger.LogWarning($"⚠️ No documents provided in request");
+                _logger.LogWarning($"?? No documents provided in request");
             }
 
-            _logger.LogInformation($"📊 Checklist before save - Documents count: {checklist.Documents.Count}");
+            _logger.LogInformation($"?? Checklist before save - Documents count: {checklist.Documents.Count}");
             foreach (var doc in checklist.Documents)
             {
                 _logger.LogInformation($"   Category: {doc.Category}, Docs: {doc.DocList.Count}");
@@ -352,8 +346,8 @@ public class CoCreatorController : ControllerBase
             _context.Checklists.Add(checklist);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation($"✅ Checklist saved to DB: {checklist.Id}");
-            _logger.LogInformation($"🔐 AssignedToRMId: {checklist.AssignedToRMId}");
+            _logger.LogInformation($"? Checklist saved to DB: {checklist.Id}");
+            _logger.LogInformation($"?? AssignedToRMId: {checklist.AssignedToRMId}");
 
             // Reload the checklist with all related data
             var createdChecklist = await _context.Checklists
@@ -366,19 +360,19 @@ public class CoCreatorController : ControllerBase
                     .ThenInclude(l => l.User)
                 .FirstOrDefaultAsync(c => c.Id == checklist.Id);
 
-            _logger.LogInformation($"📖 Checklist retrieved after save - Documents count: {createdChecklist.Documents.Count}");
-            _logger.LogInformation($"👤 RM Loaded: {(createdChecklist.AssignedToRM != null ? createdChecklist.AssignedToRM.Name : "NULL")}");
+            _logger.LogInformation($"?? Checklist retrieved after save - Documents count: {createdChecklist.Documents.Count}");
+            _logger.LogInformation($"?? RM Loaded: {(createdChecklist.AssignedToRM != null ? createdChecklist.AssignedToRM.Name : "NULL")}");
             foreach (var doc in createdChecklist.Documents)
             {
                 _logger.LogInformation($"   Category: {doc.Category}, Docs: {doc.DocList.Count}");
             }
 
             // Debug: Log RM assignment info
-            _logger.LogInformation($"🔍 DEBUG: AssignedToRMId = {createdChecklist.AssignedToRMId}");
-            _logger.LogInformation($"🔍 DEBUG: AssignedToRM is null = {createdChecklist.AssignedToRM == null}");
+            _logger.LogInformation($"?? DEBUG: AssignedToRMId = {createdChecklist.AssignedToRMId}");
+            _logger.LogInformation($"?? DEBUG: AssignedToRM is null = {createdChecklist.AssignedToRM == null}");
             if (createdChecklist.AssignedToRM != null)
             {
-                _logger.LogInformation($"🔍 DEBUG: RM ID = {createdChecklist.AssignedToRM.Id}, RM Name = {createdChecklist.AssignedToRM.Name}");
+                _logger.LogInformation($"?? DEBUG: RM ID = {createdChecklist.AssignedToRM.Id}, RM Name = {createdChecklist.AssignedToRM.Name}");
             }
 
             return StatusCode(201, new
@@ -408,8 +402,10 @@ public class CoCreatorController : ControllerBase
                             id = d.Id,
                             name = d.Name,
                             status = d.Status.ToString().ToLower(),
+                            rmStatus = d.RmStatus.ToString().ToLower(),
                             fileUrl = d.FileUrl,
-                            comment = d.Comment
+                            comment = d.Comment,
+                            deferralNumber = d.DeferralNumber
                         }).ToList()
                     }).ToList(),
                     createdAt = createdChecklist.CreatedAt,
@@ -419,7 +415,7 @@ public class CoCreatorController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Error creating checklist");
+            _logger.LogError(ex, "? Error creating checklist");
             return StatusCode(500, new { message = "Internal server error" });
         }
     }
@@ -436,6 +432,8 @@ public class CoCreatorController : ControllerBase
                 .Include(c => c.AssignedToCoChecker)
                 .Include(c => c.Documents)
                     .ThenInclude(dc => dc.DocList)
+                .Include(c => c.SupportingDocs)
+                    .ThenInclude(sd => sd.UploadedBy)
                 .OrderByDescending(c => c.CreatedAt)
                 .ThenByDescending(c => c.Id)
                 .Select(c => new
@@ -460,9 +458,23 @@ public class CoCreatorController : ControllerBase
                             id = d.Id,
                             name = d.Name,
                             status = d.Status.ToString().ToLower(),
+                            rmStatus = d.RmStatus.ToString().ToLower(),
                             fileUrl = d.FileUrl,
-                            comment = d.Comment
+                            comment = d.Comment,
+                            deferralNumber = d.DeferralNumber,
+                            deferralNo = d.DeferralNumber
                         }).ToList()
+                    }).ToList(),
+                    supportingDocs = c.SupportingDocs.Select(sd => new
+                    {
+                        id = sd.Id,
+                        fileName = sd.FileName,
+                        fileUrl = sd.FileUrl,
+                        fileSize = sd.FileSize,
+                        fileType = sd.FileType,
+                        uploadedAt = sd.UploadedAt,
+                        uploadedBy = sd.UploadedBy != null ? new { id = sd.UploadedBy.Id, name = sd.UploadedBy.Name } : null,
+                        uploadedByRole = sd.UploadedByRole
                     }).ToList(),
                     createdAt = c.CreatedAt,
                     updatedAt = c.UpdatedAt
@@ -484,7 +496,7 @@ public class CoCreatorController : ControllerBase
     {
         try
         {
-            _logger.LogInformation($"🔍 Fetching checklist: {id}");
+            _logger.LogInformation($"?? Fetching checklist: {id}");
 
             var checklist = await _context.Checklists
                 .Include(c => c.CreatedBy)
@@ -499,11 +511,11 @@ public class CoCreatorController : ControllerBase
 
             if (checklist == null)
             {
-                _logger.LogWarning($"❌ Checklist not found: {id}");
+                _logger.LogWarning($"? Checklist not found: {id}");
                 return NotFound(new { message = "Checklist not found" });
             }
 
-            _logger.LogInformation($"✅ Found checklist: {checklist.DclNo}, IBPS: {checklist.IbpsNo}, RM: {checklist.AssignedToRM?.Name}, Docs: {checklist.Documents.Count}");
+            _logger.LogInformation($"? Found checklist: {checklist.DclNo}, IBPS: {checklist.IbpsNo}, RM: {checklist.AssignedToRM?.Name}, Docs: {checklist.Documents.Count}");
 
             return Ok(new
             {
@@ -527,6 +539,7 @@ public class CoCreatorController : ControllerBase
                         id = d.Id,
                         name = d.Name,
                         status = d.Status.ToString().ToLower(),
+                        rmStatus = d.RmStatus.ToString().ToLower(),
                         fileUrl = d.FileUrl,
                         comment = d.Comment,
                         deferralReason = d.DeferralReason,
@@ -552,7 +565,7 @@ public class CoCreatorController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Error fetching checklist");
+            _logger.LogError(ex, "? Error fetching checklist");
             return StatusCode(500, new { message = "Internal server error" });
         }
     }
@@ -565,7 +578,7 @@ public class CoCreatorController : ControllerBase
     {
         try
         {
-            _logger.LogInformation($"🔍 Fetching checklist by DCL: {dclNo}");
+            _logger.LogInformation($"?? Fetching checklist by DCL: {dclNo}");
 
             var checklist = await _context.Checklists
                 .Include(c => c.CreatedBy)
@@ -577,11 +590,11 @@ public class CoCreatorController : ControllerBase
 
             if (checklist == null)
             {
-                _logger.LogWarning($"❌ Checklist not found: {dclNo}");
+                _logger.LogWarning($"? Checklist not found: {dclNo}");
                 return NotFound(new { message = "Checklist not found" });
             }
 
-            _logger.LogInformation($"✅ Found checklist: {checklist.DclNo}, IBPS: {checklist.IbpsNo}, RM: {checklist.AssignedToRM?.Name}, Docs: {checklist.Documents.Count}");
+            _logger.LogInformation($"? Found checklist: {checklist.DclNo}, IBPS: {checklist.IbpsNo}, RM: {checklist.AssignedToRM?.Name}, Docs: {checklist.Documents.Count}");
 
             return Ok(new
             {
@@ -605,8 +618,10 @@ public class CoCreatorController : ControllerBase
                         id = d.Id,
                         name = d.Name,
                         status = d.Status.ToString().ToLower(),
+                        rmStatus = d.RmStatus.ToString().ToLower(),
                         fileUrl = d.FileUrl,
-                        comment = d.Comment
+                        comment = d.Comment,
+                        deferralNumber = d.DeferralNumber
                     }).ToList()
                 }).ToList(),
                 createdAt = checklist.CreatedAt,
@@ -615,14 +630,14 @@ public class CoCreatorController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Error fetching checklist by DCL number");
+            _logger.LogError(ex, "? Error fetching checklist by DCL number");
             return StatusCode(500, new { message = "Internal server error" });
         }
     }
 
     // PUT /api/cocreatorChecklist/:id
     [HttpPut("{id}")]
-    [RoleAuthorize(UserRole.CoCreator, UserRole.RM, UserRole.CoChecker)]
+
     public async Task<IActionResult> UpdateChecklist(Guid id, [FromBody] UpdateChecklistRequest request)
     {
         try
@@ -665,9 +680,22 @@ public class CoCreatorController : ControllerBase
                 .OrderByDescending(l => l.Timestamp)
                 .Select(l => new
                 {
+                    _id = l.Id,
                     id = l.Id,
                     message = l.Message,
-                    user = l.User != null ? new { id = l.User.Id, name = l.User.Name } : null,
+                    userId = l.User != null ? new
+                    {
+                        id = l.User.Id,
+                        name = l.User.Name,
+                        role = l.User.Role.ToString() // Include role as string representation
+                    } : null,
+                    user = l.User != null ? new
+                    {
+                        id = l.User.Id,
+                        name = l.User.Name,
+                        role = l.User.Role.ToString()
+                    } : null,
+                    createdAt = l.Timestamp,
                     timestamp = l.Timestamp
                 })
                 .ToListAsync();
@@ -755,8 +783,10 @@ public class CoCreatorController : ControllerBase
                             id = d.Id,
                             name = d.Name,
                             status = d.Status.ToString().ToLower(),
+                            rmStatus = d.RmStatus.ToString().ToLower(),
                             fileUrl = d.FileUrl,
-                            comment = d.Comment
+                            comment = d.Comment,
+                            deferralNumber = d.DeferralNumber
                         }).ToList()
                     }).ToList()
                 })
@@ -773,7 +803,7 @@ public class CoCreatorController : ControllerBase
 
     // PUT /api/cocreatorChecklist/:id/co-create
     [HttpPut("{id}/co-create")]
-    [RoleAuthorize(UserRole.CoCreator)]
+
     public async Task<IActionResult> CoCreatorReview(Guid id, [FromBody] CoCreatorReviewRequest request)
     {
         try
@@ -817,7 +847,7 @@ public class CoCreatorController : ControllerBase
 
     // PUT /api/cocreatorChecklist/:id/co-check
     [HttpPut("{id}/co-check")]
-    [RoleAuthorize(UserRole.CoChecker)]
+
     public async Task<IActionResult> CoCheckerApproval(Guid id, [FromBody] CoCheckerApprovalRequest request)
     {
         try
@@ -859,7 +889,7 @@ public class CoCreatorController : ControllerBase
 
     // PUT /api/cocreatorChecklist/update-document
     [HttpPut("update-document")]
-    [RoleAuthorize(UserRole.Admin)]
+
     public async Task<IActionResult> UpdateDocumentAdmin([FromBody] AdminUpdateDocumentRequest request)
     {
         try
@@ -888,43 +918,330 @@ public class CoCreatorController : ControllerBase
 
     // PATCH /api/cocreatorChecklist/update-status
     [HttpPatch("update-status")]
-    public async Task<IActionResult> UpdateChecklistStatus([FromBody] UpdateChecklistStatusRequest request)
+
+    public async Task<IActionResult> UpdateChecklistStatus([FromBody] CoCreatorSubmitToCCRequest request)
     {
         try
         {
-            var checklist = await _context.Checklists.FindAsync(request.ChecklistId);
-            if (checklist == null)
+            if (string.IsNullOrWhiteSpace(request.DclNo))
             {
-                return NotFound(new { message = "Checklist not found" });
+                return BadRequest(new { error = "DCL No is required" });
             }
 
-            checklist.Status = request.Status;
+            // Parse user ID more safely
+            var userIdString = User.FindFirst("id")?.Value;
+            if (string.IsNullOrWhiteSpace(userIdString) || !Guid.TryParse(userIdString, out var userId))
+            {
+                _logger.LogError("? Invalid or missing user ID in token");
+                return Unauthorized(new { error = "Invalid user ID in token" });
+            }
+
+            var checklist = await _context.Checklists
+                .Include(c => c.Documents)
+                    .ThenInclude(cat => cat.DocList)
+                .Include(c => c.AssignedToCoChecker)
+                .Include(c => c.AssignedToRM)
+                .Include(c => c.CreatedBy)
+                .FirstOrDefaultAsync(c => c.DclNo == request.DclNo);
+
+            if (checklist == null)
+            {
+                return NotFound(new { error = "Checklist not found" });
+            }
+
+            /* ============================================================
+               DOCUMENT UPDATE � UPDATE IN PLACE (NO REPLACEMENT)
+            ============================================================ */
+            if (request.Documents != null && request.Documents.Any())
+            {
+                var existingDocsMap = new Dictionary<Guid, Document>();
+
+                foreach (var cat in checklist.Documents)
+                {
+                    foreach (var doc in cat.DocList)
+                    {
+                        existingDocsMap[doc.Id] = doc;
+                    }
+                }
+
+                foreach (var docFromRequest in request.Documents)
+                {
+                    var docId = docFromRequest.Id ?? docFromRequest._id;
+
+                    if (docId.HasValue && existingDocsMap.ContainsKey(docId.Value))
+                    {
+                        // UPDATE EXISTING DOCUMENT IN PLACE
+                        var existingDoc = existingDocsMap[docId.Value];
+
+                        existingDoc.Name = docFromRequest.Name ?? existingDoc.Name;
+                        existingDoc.Status = TryParseDocumentStatus(docFromRequest.Status?.ToString() ?? existingDoc.Status.ToString()) ?? existingDoc.Status;
+                        existingDoc.Comment = docFromRequest.Comment ?? existingDoc.Comment;
+                        existingDoc.FileUrl = docFromRequest.FileUrl ?? existingDoc.FileUrl;
+                        existingDoc.DeferralReason = docFromRequest.DeferralReason ?? existingDoc.DeferralReason;
+
+                        // Update deferral number if provided
+                        if (!string.IsNullOrWhiteSpace(docFromRequest.DeferralNo))
+                        {
+                            existingDoc.DeferralNumber = docFromRequest.DeferralNo;
+                        }
+
+                        existingDoc.UpdatedAt = DateTime.UtcNow;
+
+                        // Mark for update
+                        _context.Documents.Update(existingDoc);
+                    }
+                }
+            }
+
+            /* ============================================================
+               WORKFLOW STATUS (STAGE, NOT DECISION)
+            ============================================================ */
+            checklist.Status = ChecklistStatus.CoCheckerReview; // workflow stage
+
+            /* ============================================================
+               ASSIGN CO-CHECKER (STRICT & SAFE)
+            ============================================================ */
+            Guid? checkerId = request.AssignedToCoChecker;
+
+            if (checkerId.HasValue)
+            {
+                var checker = await _context.Users.FirstOrDefaultAsync(u =>
+                    u.Id == checkerId.Value && u.Role == UserRole.CoChecker);
+
+                if (checker == null)
+                {
+                    return BadRequest(new { error = "Assigned user is not a valid Co-Checker" });
+                }
+
+                checklist.AssignedToCoCheckerId = checkerId.Value;
+            }
+            else
+            {
+                // Find least busy Co-Checker (optional - you may implement this logic)
+                var leastBusyChecker = await _context.Users
+                    .Where(u => u.Role == UserRole.CoChecker)
+                    .FirstOrDefaultAsync();
+
+                if (leastBusyChecker == null)
+                {
+                    return BadRequest(new { error = "No available Co-Checker found" });
+                }
+
+                checklist.AssignedToCoCheckerId = leastBusyChecker.Id;
+            }
+
+            checklist.SubmittedToCoChecker = request.SubmittedToCoChecker ?? true;
+
+            /* ============================================================
+               ENSURE CHECKER STATUS EXISTS (DOCUMENT LEVEL)
+            ============================================================ */
+            foreach (var category in checklist.Documents)
+            {
+                foreach (var doc in category.DocList)
+                {
+                    if (doc.CheckerStatus == CheckerStatus.Pending || !Enum.IsDefined(typeof(CheckerStatus), doc.CheckerStatus))
+                    {
+                        doc.CheckerStatus = CheckerStatus.Pending;
+                    }
+                    // Ensure deferralNumber is preserved
+                    if (doc.Status == DocumentStatus.Deferred && string.IsNullOrWhiteSpace(doc.DeferralNumber))
+                    {
+                        doc.DeferralNumber = doc.DeferralNumber ?? null;
+                    }
+                }
+            }
+
+            /* ============================================================
+               COMMENTS / ATTACHMENTS / AUDIT
+            ============================================================ */
+            checklist.FinalComment = request.FinalComment ?? "";
+            checklist.UpdatedAt = DateTime.UtcNow;
+
             await _context.SaveChangesAsync();
 
-            return Ok(new { message = "Status updated successfully", status = checklist.Status.ToString() });
+            /* ============================================================
+               LOG AUDIT
+            ============================================================ */
+            var deferralDocsCount = request.Documents?
+                .Where(d => !string.IsNullOrWhiteSpace(d.DeferralNo))
+                .Count() ?? 0;
+
+            var auditLog = new AuditLog
+            {
+                Id = Guid.NewGuid(),
+                PerformedById = userId,
+                Action = "SUBMIT_TO_COCHECKER",
+                Resource = "CHECKLIST",
+                ResourceId = checklist.Id.ToString(),
+                TargetUserId = checklist.AssignedToCoCheckerId,
+                Details = $"DCL: {checklist.DclNo}, Deferral Docs: {deferralDocsCount}",
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.AuditLogs.Add(auditLog);
+
+            /* ============================================================
+               CREATE NOTIFICATION FOR CO-CHECKER
+            ============================================================ */
+            if (checklist.AssignedToCoCheckerId.HasValue)
+            {
+                var notification = new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = checklist.AssignedToCoCheckerId.Value,
+                    Message = $"DCL {checklist.DclNo} has been submitted for your approval",
+                    Read = false,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                _context.Notifications.Add(notification);
+            }
+
+            /* ============================================================
+               ADD LOG ENTRY
+            ============================================================ */
+            var log = new ChecklistLog
+            {
+                Id = Guid.NewGuid(),
+                Message = "Submitted to Co-Checker for review",
+                UserId = userId,
+                ChecklistId = checklist.Id,
+                Timestamp = DateTime.UtcNow
+            };
+            _context.ChecklistLogs.Add(log);
+
+            // If CoCreator provided a comment, add it as a separate log entry
+            if (!string.IsNullOrWhiteSpace(request.FinalComment))
+            {
+                var commentLog = new ChecklistLog
+                {
+                    Id = Guid.NewGuid(),
+                    Message = $"CoCreator Comment: {request.FinalComment}",
+                    UserId = userId,
+                    ChecklistId = checklist.Id,
+                    Timestamp = DateTime.UtcNow
+                };
+                _context.ChecklistLogs.Add(commentLog);
+            }
+
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation($"? Assigned Co-Checker: {checklist.AssignedToCoCheckerId}");
+
+            return Ok(new
+            {
+                message = "Checklist submitted to Co-Checker successfully",
+                checklist = new
+                {
+                    id = checklist.Id,
+                    dclNo = checklist.DclNo,
+                    status = checklist.Status.ToString(),
+                    assignedToCoCheckerId = checklist.AssignedToCoCheckerId,
+                    assignedToCoChecker = checklist.AssignedToCoChecker != null ? new
+                    {
+                        id = checklist.AssignedToCoChecker.Id,
+                        name = checklist.AssignedToCoChecker.Name
+                    } : null,
+                    finalComment = checklist.FinalComment,
+                    updatedAt = checklist.UpdatedAt
+                }
+            });
+        }
+        catch (DbUpdateConcurrencyException dbEx)
+        {
+            _logger.LogError(dbEx, "?? Concurrency exception - checklist may have been modified elsewhere");
+            return StatusCode(409, new
+            {
+                error = "Checklist has been modified. Please reload and try again.",
+                message = "Concurrency conflict detected"
+            });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating status");
-            return StatusCode(500, new { message = "Internal server error" });
+            _logger.LogError(ex, "? Error updating checklist status - Type: {ExceptionType}, Message: {ExceptionMessage}, Inner: {InnerMessage}",
+                ex.GetType().Name, ex.Message, ex.InnerException?.Message);
+
+            // Return more detailed error info for debugging
+            return StatusCode(500, new
+            {
+                error = "Failed to update checklist status",
+                message = ex.Message,
+                details = ex.InnerException?.Message
+            });
         }
+    }
+
+    // Helper method to parse DocumentStatus
+    private DocumentStatus? TryParseDocumentStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+            return null;
+
+        if (Enum.TryParse<DocumentStatus>(status, ignoreCase: true, out var result))
+            return result;
+
+        return null;
     }
 
     // POST /api/cocreatorChecklist/:id/submit-to-rm
     [HttpPost("{id}/submit-to-rm")]
-    [RoleAuthorize(UserRole.CoCreator)]
-    public async Task<IActionResult> SubmitToRM(Guid id)
+
+    public async Task<IActionResult> SubmitToRM(Guid id, [FromBody] SubmitToRMRequest? request = null)
     {
         try
         {
             var userId = Guid.Parse(User.FindFirst("id")?.Value ?? string.Empty);
             var checklist = await _context.Checklists
                 .Include(c => c.AssignedToRM)
+                .Include(c => c.Documents)
+                    .ThenInclude(dc => dc.DocList)
                 .FirstOrDefaultAsync(c => c.Id == id);
 
             if (checklist == null)
             {
                 return NotFound(new { message = "Checklist not found" });
+            }
+
+            /* ============================================================
+               SAVE DOCUMENT STATUS UPDATES FROM CO-CREATOR
+            ============================================================ */
+            if (request?.Documents != null && request.Documents.Any())
+            {
+                _logger.LogInformation($"?? Updating {request.Documents.Count()} document categories before RM submission");
+
+                foreach (var catUpdate in request.Documents)
+                {
+                    var category = checklist.Documents.FirstOrDefault(c => c.Category == catUpdate.Category);
+                    if (category == null) continue;
+
+                    foreach (var docUpdate in catUpdate.DocList ?? new List<DocumentDto>())
+                    {
+                        var docId = docUpdate.DocumentId ?? docUpdate.Id ?? docUpdate._id;
+                        if (!docId.HasValue) continue;
+
+                        var doc = category.DocList.FirstOrDefault(d => d.Id == docId.Value);
+                        if (doc == null) continue;
+
+                        // Update document with CO-CREATOR changes
+                        if (!string.IsNullOrEmpty(docUpdate.Comment))
+                            doc.Comment = docUpdate.Comment;
+
+                        if (docUpdate.Status.HasValue)
+                            doc.Status = docUpdate.Status.Value;
+
+                        if (!string.IsNullOrEmpty(docUpdate.FileUrl))
+                            doc.FileUrl = docUpdate.FileUrl;
+
+                        if (!string.IsNullOrEmpty(docUpdate.DeferralNumber))
+                            doc.DeferralNumber = docUpdate.DeferralNumber;
+
+                        if (!string.IsNullOrEmpty(docUpdate.DeferralReason))
+                            doc.DeferralReason = docUpdate.DeferralReason;
+
+                        doc.UpdatedAt = DateTime.UtcNow;
+
+                        _logger.LogInformation($"  ? Updated doc: Status={doc.Status}, Comment={doc.Comment}");
+                    }
+                }
             }
 
             checklist.Status = ChecklistStatus.RMReview;
@@ -956,6 +1273,8 @@ public class CoCreatorController : ControllerBase
 
             await _context.SaveChangesAsync();
 
+            _logger.LogInformation($"? Checklist {checklist.DclNo} submitted to RM with updated documents");
+
             return Ok(new { message = "Checklist submitted to RM successfully" });
         }
         catch (Exception ex)
@@ -967,7 +1286,7 @@ public class CoCreatorController : ControllerBase
 
     // POST /api/cocreatorChecklist/:id/submit-to-cochecker
     [HttpPost("{id}/submit-to-cochecker")]
-    [RoleAuthorize(UserRole.CoCreator, UserRole.RM)]
+
     public async Task<IActionResult> SubmitToCoChecker(Guid id)
     {
         try
@@ -1046,7 +1365,7 @@ public class CoCreatorController : ControllerBase
 
     // POST /api/cocreatorChecklist/:id/documents
     [HttpPost("{id}/documents")]
-    [RoleAuthorize(UserRole.CoCreator, UserRole.RM)]
+
     public async Task<IActionResult> AddDocument(Guid id, [FromBody] AddDocumentRequest request)
     {
         try
@@ -1110,7 +1429,7 @@ public class CoCreatorController : ControllerBase
 
     // PATCH /api/cocreatorChecklist/:id/documents/:docId
     [HttpPatch("{id}/documents/{docId}")]
-    [RoleAuthorize(UserRole.CoCreator, UserRole.RM)]
+
     public async Task<IActionResult> UpdateDocument(Guid id, Guid docId, [FromBody] UpdateDocumentRequest request)
     {
         try
@@ -1158,7 +1477,7 @@ public class CoCreatorController : ControllerBase
 
     // DELETE /api/cocreatorChecklist/:id/documents/:docId
     [HttpDelete("{id}/documents/{docId}")]
-    [RoleAuthorize(UserRole.RM, UserRole.CoCreator)]
+
     public async Task<IActionResult> DeleteDocument(Guid id, Guid docId)
     {
         try
@@ -1196,7 +1515,7 @@ public class CoCreatorController : ControllerBase
 
     // POST /api/cocreatorChecklist/:id/documents/:docId/upload
     [HttpPost("{id}/documents/{docId}/upload")]
-    [RoleAuthorize(UserRole.CoCreator, UserRole.RM)]
+
     public async Task<IActionResult> UploadDocumentFile(Guid id, Guid docId, IFormFile file)
     {
         try
@@ -1248,7 +1567,7 @@ public class CoCreatorController : ControllerBase
 
     // POST /api/cocreatorChecklist/:id/upload
     [HttpPost("{id}/upload")]
-    [RoleAuthorize(UserRole.CoCreator, UserRole.RM)]
+
     public async Task<IActionResult> UploadSupportingDocs(Guid id, List<IFormFile> files)
     {
         try
@@ -1323,7 +1642,7 @@ public class CoCreatorController : ControllerBase
 
     // GET /api/cocreatorChecklist/cocreator/active
     [HttpGet("cocreator/active")]
-    [RoleAuthorize(UserRole.CoCreator)]
+
     public async Task<IActionResult> GetActiveChecklists()
     {
         try
@@ -1348,7 +1667,117 @@ public class CoCreatorController : ControllerBase
             return StatusCode(500, new { message = "Internal server error" });
         }
     }
+}
 
+// ============================================
+// REQUEST/RESPONSE MODELS
+// ============================================
 
+public class SaveChecklistDraftRequest
+{
+    public Guid? ChecklistId { get; set; }
+    public string? DraftDataJson { get; set; }
+    public bool? IsDraft { get; set; }
+    public DateTime? DraftExpiresAt { get; set; }
+}
+
+public class UpdateChecklistWithDocsRequest
+{
+    public string? Category { get; set; }
+    public List<DocumentDto>? Documents { get; set; }
+    public ChecklistStatus? Status { get; set; }
+    public string? GeneralComment { get; set; }
+}
+
+public class DocumentDto
+{
+    public Guid? Id { get; set; }
+    public Guid? _id { get; set; }
+    public Guid? DocumentId { get; set; }
+    public string? Name { get; set; }
+    public string? Category { get; set; }
+    public DocumentStatus? Status { get; set; }
+    public string? Comment { get; set; }
+    public string? FileUrl { get; set; }
+    public string? DeferralReason { get; set; }
+    public string? DeferralNumber { get; set; }
+    public string? DeferralNo { get; set; }
+    public List<DocumentDto>? DocList { get; set; }
+}
+
+public class CreateChecklistRequest
+{
+    public Guid? CustomerId { get; set; }
+    public string? CustomerNumber { get; set; }
+    public string? CustomerName { get; set; }
+    public string? LoanType { get; set; }
+    public Guid? AssignedToRMId { get; set; }
+    public List<DocumentCategory>? Documents { get; set; }
+    public string? IbpsNo { get; set; }
+}
+
+public class UpdateChecklistRequest
+{
+    public string? CustomerName { get; set; }
+    public string? LoanType { get; set; }
+    public Guid? AssignedToRMId { get; set; }
+    public Guid? AssignedToCoCheckerId { get; set; }
+}
+
+public class CoCreatorReviewRequest
+{
+    public bool Approved { get; set; }
+    public string? Comment { get; set; }
+}
+
+public class CoCheckerApprovalRequest
+{
+    public bool Approved { get; set; }
+    public string? Comment { get; set; }
+}
+
+public class AdminUpdateDocumentRequest
+{
+    public Guid DocumentId { get; set; }
+    public DocumentStatus? Status { get; set; }
+    public string? Comment { get; set; }
+}
+
+public class CoCreatorSubmitToCCRequest
+{
+    public string? DclNo { get; set; }
+    public List<DocumentDto>? Documents { get; set; }
+    public bool? SubmittedToCoChecker { get; set; }
+    public Guid? AssignedToCoChecker { get; set; }
+    public string? FinalComment { get; set; }
+}
+
+public class SubmitToRMRequest
+{
+    public string? Category { get; set; }
+    public List<DocumentDto>? DocList { get; set; }
+    public List<DocumentDto>? Documents { get; set; }
+    public string? CreatorComment { get; set; }
+    public string? DeferralNumber { get; set; }
+}
+
+public class UpdateStatusRequest
+{
+    public ChecklistStatus Status { get; set; }
+}
+
+public class AddDocumentRequest
+{
+    public string? Category { get; set; }
+    public string? Name { get; set; }
+}
+
+public class UpdateDocumentRequest
+{
+    public DocumentStatus? Status { get; set; }
+    public string? CheckerComment { get; set; }
+    public string? CreatorComment { get; set; }
+    public string? RmComment { get; set; }
+    public string? FileUrl { get; set; }
 }
 

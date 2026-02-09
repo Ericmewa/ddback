@@ -1,4 +1,5 @@
 using NCBA.DCL.Models;
+using System.Text.Json.Serialization;
 
 namespace NCBA.DCL.DTOs;
 
@@ -76,6 +77,36 @@ public class UpdateChecklistStatusRequest
     public ChecklistStatus Status { get; set; }
 }
 
+public class UpdateCheckerStatusRequest
+{
+    [JsonPropertyName("id")]
+    public Guid? Id { get; set; }
+
+    [JsonPropertyName("action")]
+    public string? Action { get; set; }
+
+    [JsonPropertyName("checkerDecisions")]
+    public List<CheckerDecisionDto>? CheckerDecisions { get; set; }
+
+    [JsonPropertyName("checkerComments")]
+    public string? CheckerComments { get; set; }
+
+    [JsonPropertyName("checkerComment")]
+    public string? CheckerComment { get; set; }
+}
+
+public class CheckerDecisionDto
+{
+    [JsonPropertyName("documentId")]
+    public Guid? DocumentId { get; set; }
+
+    [JsonPropertyName("checkerStatus")]
+    public string? CheckerStatus { get; set; }
+
+    [JsonPropertyName("checkerComment")]
+    public string? CheckerComment { get; set; }
+}
+
 // Checker DTOs
 public class UpdateCheckerDCLRequest
 {
@@ -85,9 +116,17 @@ public class UpdateCheckerDCLRequest
 
 public class DocumentUpdateDto
 {
-    public Guid DocumentId { get; set; }
+    [JsonPropertyName("id")]
+    public Guid? Id { get; set; }
+
+    [JsonPropertyName("_id")]
+    public Guid? _id { get; set; }
+
     public CheckerStatus? Status { get; set; }
     public string? CheckerComment { get; set; }
+
+    // Helper property to resolve either id or _id
+    public Guid? DocumentId => Id ?? _id;
 }
 
 public class RejectDCLRequest
@@ -98,26 +137,116 @@ public class RejectDCLRequest
 // RM DTOs
 public class SubmitToCoCreatorRequest
 {
-    public Guid ChecklistId { get; set; }
+    [JsonPropertyName("checklistId")]
+    public Guid? ChecklistId { get; set; }
+
+    [JsonPropertyName("rmGeneralComment")]
     public string? RmGeneralComment { get; set; }
+
+    [JsonPropertyName("documents")]
     public List<RmDocumentUpdateDto>? Documents { get; set; }
+}
+
+// CoCreator SubmitToRM Request - saves document updates before submitting
+public class SubmitToRMRequest
+{
+    [JsonPropertyName("documents")]
+    public List<DocumentCategoryDto>? Documents { get; set; }
 }
 
 public class RmDocumentUpdateDto
 {
-    public string Category { get; set; } = string.Empty;
+    [JsonPropertyName("category")]
+    public string? Category { get; set; }
+
+    [JsonPropertyName("action")]
     public string? Action { get; set; }
+
+    [JsonPropertyName("status")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
     public DocumentStatus? Status { get; set; }
+
+    [JsonPropertyName("rmStatus")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
     public RmStatus? RmStatus { get; set; }
+
+    [JsonPropertyName("comment")]
     public string? Comment { get; set; }
+
+    [JsonPropertyName("fileUrl")]
     public string? FileUrl { get; set; }
+
+    [JsonPropertyName("deferralReason")]
     public string? DeferralReason { get; set; }
+
+    [JsonPropertyName("deferralNumber")]
     public string? DeferralNumber { get; set; }
-    public Guid _id { get; set; } // Using _id to match frontend's convention or Id
-    public Guid Id { get; set; }
+
+    [JsonPropertyName("_id")]
+    public Guid? _id { get; set; }
+
+    [JsonPropertyName("id")]
+    public Guid? Id { get; set; }
+
+    // Helper property to get the document ID from either _id or Id
+    public Guid? DocumentId => _id ?? Id;
 }
 
 public class UploadSupportingDocDto
 {
     public IFormFile File { get; set; } = null!;
+}
+
+public class CoCreatorSubmitToCCRequest
+{
+    [JsonPropertyName("dclNo")]
+    public string DclNo { get; set; } = string.Empty;
+
+    [JsonPropertyName("documents")]
+    public List<CoCreatorDocumentDto>? Documents { get; set; }
+
+    [JsonPropertyName("submittedToCoChecker")]
+    public bool? SubmittedToCoChecker { get; set; }
+
+    [JsonPropertyName("assignedToCoChecker")]
+    public Guid? AssignedToCoChecker { get; set; }
+
+    [JsonPropertyName("finalComment")]
+    public string? FinalComment { get; set; }
+
+    [JsonPropertyName("attachments")]
+    public List<string>? Attachments { get; set; }
+}
+
+public class CoCreatorDocumentDto
+{
+    [JsonPropertyName("id")]
+    public Guid? Id { get; set; }
+
+    [JsonPropertyName("_id")]
+    public Guid? _id { get; set; }
+
+    [JsonPropertyName("category")]
+    public string? Category { get; set; }
+
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("status")]
+    public string? Status { get; set; }
+
+    [JsonPropertyName("comment")]
+    public string? Comment { get; set; }
+
+    [JsonPropertyName("fileUrl")]
+    public string? FileUrl { get; set; }
+
+    [JsonPropertyName("deferralNo")]
+    public string? DeferralNo { get; set; }
+
+    [JsonPropertyName("deferralReason")]
+    public string? DeferralReason { get; set; }
+
+    [JsonPropertyName("expiryDate")]
+    public DateTime? ExpiryDate { get; set; }
 }

@@ -28,19 +28,24 @@ public class CheckerController : ControllerBase
     }
 
     // GET /api/checkerChecklist/active-dcls
+    // Aligns with Node.js: Returns DCLs in co_creator_review status
     [HttpGet("active-dcls")]
     public async Task<IActionResult> GetActiveDCLs()
     {
         try
         {
+            _logger.LogInformation("🔍 Fetching active DCLs");
+
             var activeDcls = await _context.Checklists
                 .Where(c => c.Status == ChecklistStatus.CoCreatorReview)
                 .Include(c => c.CreatedBy)
                 .Include(c => c.AssignedToRM)
                 .Include(c => c.AssignedToCoChecker)
+                .OrderByDescending(c => c.CreatedAt)
                 .Select(c => new
                 {
                     id = c.Id,
+                    _id = c.Id,
                     dclNo = c.DclNo,
                     customerNumber = c.CustomerNumber,
                     customerName = c.CustomerName,
@@ -52,21 +57,27 @@ public class CheckerController : ControllerBase
                 })
                 .ToListAsync();
 
+            _logger.LogInformation($"📊 Found {activeDcls.Count} active DCLs");
             return Ok(activeDcls);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching active DCLs");
-            return StatusCode(500, new { message = "Internal server error" });
+            _logger.LogError(ex, "🔥 Active DCLs Error");
+            return StatusCode(500, new { error = ex.Message });
         }
     }
 
+
+
     // GET /api/checkerChecklist/my-queue/:checkerId
+    // Aligns with Node.js: status "in_progress" assigned to checker
     [HttpGet("my-queue/{checkerId}")]
     public async Task<IActionResult> GetMyQueue(Guid checkerId)
     {
         try
         {
+            _logger.LogInformation($"🔍 Fetching my queue for checker: {checkerId}");
+
             var myQueue = await _context.Checklists
                 .Where(c => c.AssignedToCoCheckerId == checkerId &&
                            c.Status == ChecklistStatus.CoCheckerReview)
@@ -74,33 +85,55 @@ public class CheckerController : ControllerBase
                 .Include(c => c.AssignedToRM)
                 .Include(c => c.Documents)
                     .ThenInclude(dc => dc.DocList)
-                .OrderByDescending(c => c.CreatedAt)
+                .OrderByDescending(c => c.UpdatedAt)
+                .Select(c => new
+                {
+                    id = c.Id,
+                    _id = c.Id,
+                    dclNo = c.DclNo,
+                    customerNumber = c.CustomerNumber,
+                    customerName = c.CustomerName,
+                    loanType = c.LoanType,
+                    status = c.Status.ToString(),
+                    createdBy = c.CreatedBy != null ? new { id = c.CreatedBy.Id, name = c.CreatedBy.Name } : null,
+                    assignedToRM = c.AssignedToRM != null ? new { id = c.AssignedToRM.Id, name = c.AssignedToRM.Name } : null,
+                    documents = c.Documents,
+                    createdAt = c.CreatedAt,
+                    updatedAt = c.UpdatedAt
+                })
                 .ToListAsync();
 
+            _logger.LogInformation($"📊 Found {myQueue.Count} items in queue");
             return Ok(myQueue);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching checker queue");
-            return StatusCode(500, new { message = "Internal server error" });
+            _logger.LogError(ex, "🔥 Error fetching checker queue");
+            return StatusCode(500, new { error = ex.Message });
         }
     }
 
     // GET /api/checkerChecklist/completed/:checkerId
+    // Aligns with Node.js: Returns approved DCLs for this checker
     [HttpGet("completed/{checkerId}")]
     public async Task<IActionResult> GetCompletedDCLs(Guid checkerId)
     {
         try
         {
+            _logger.LogInformation($"🔍 Fetching completed DCLs for checker: {checkerId}");
+
             var completed = await _context.Checklists
                 .Where(c => c.AssignedToCoCheckerId == checkerId &&
                            c.Status == ChecklistStatus.Approved)
                 .Include(c => c.CreatedBy)
                 .Include(c => c.AssignedToRM)
+                .Include(c => c.Documents)
+                    .ThenInclude(dc => dc.DocList)
                 .OrderByDescending(c => c.UpdatedAt)
                 .Select(c => new
                 {
                     id = c.Id,
+                    _id = c.Id,
                     dclNo = c.DclNo,
                     customerNumber = c.CustomerNumber,
                     customerName = c.CustomerName,
@@ -113,21 +146,25 @@ public class CheckerController : ControllerBase
                 })
                 .ToListAsync();
 
+            _logger.LogInformation($"📊 Found {completed.Count} completed DCLs");
             return Ok(completed);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching completed DCLs");
-            return StatusCode(500, new { message = "Internal server error" });
+            _logger.LogError(ex, "🔥 Completed DCLs Error");
+            return StatusCode(500, new { error = ex.Message });
         }
     }
 
     // GET /api/checkerChecklist/dcl/:id
+    // Aligns with Node.js: Returns single DCL with all details
     [HttpGet("dcl/{id}")]
     public async Task<IActionResult> GetDCLById(Guid id)
     {
         try
         {
+            _logger.LogInformation($"🔍 Fetching DCL by ID: {id}");
+
             var dcl = await _context.Checklists
                 .Include(c => c.CreatedBy)
                 .Include(c => c.AssignedToRM)
@@ -141,15 +178,17 @@ public class CheckerController : ControllerBase
 
             if (dcl == null)
             {
-                return NotFound(new { message = "DCL not found" });
+                _logger.LogWarning($"❌ DCL not found: {id}");
+                return NotFound(new { error = "DCL not found" });
             }
 
+            _logger.LogInformation($"✅ DCL found: {dcl.DclNo}");
             return Ok(dcl);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching DCL");
-            return StatusCode(500, new { message = "Internal server error" });
+            _logger.LogError(ex, "🔥 Get DCL Error");
+            return StatusCode(500, new { error = ex.Message });
         }
     }
 
@@ -176,9 +215,13 @@ public class CheckerController : ControllerBase
             {
                 foreach (var docUpdate in request.DocumentUpdates)
                 {
+                    // Use DocumentId helper if available, fallback to Id or _id
+                    var docId = docUpdate.DocumentId ?? docUpdate.Id ?? docUpdate._id;
+                    if (!docId.HasValue) continue;
+
                     foreach (var category in dcl.Documents)
                     {
-                        var doc = category.DocList.FirstOrDefault(x => x.Id == docUpdate.DocumentId);
+                        var doc = category.DocList.FirstOrDefault(x => x.Id == docId.Value);
                         if (doc != null)
                         {
                             if (docUpdate.Status.HasValue) doc.CheckerStatus = docUpdate.Status.Value;
@@ -310,64 +353,233 @@ public class CheckerController : ControllerBase
     }
 
     // PATCH /api/checkerChecklist/update-status
+    // Aligns with Node.js: Handles bulk updates with checkerDecisions array
     [HttpPatch("update-status")]
     [RoleAuthorize(UserRole.CoChecker)]
-    public async Task<IActionResult> UpdateStatus([FromBody] UpdateChecklistStatusRequest request)
+    public async Task<IActionResult> UpdateStatus([FromBody] UpdateCheckerStatusRequest request)
     {
         try
         {
-            var checklist = await _context.Checklists.FindAsync(request.ChecklistId);
-            if (checklist == null)
+            var userId = Guid.Parse(User.FindFirst("id")?.Value ?? string.Empty);
+            _logger.LogInformation($"RTK Query: Sending payload to updateCheckerStatus: {System.Text.Json.JsonSerializer.Serialize(request)}");
+
+            if (!request.Id.HasValue)
             {
-                return NotFound(new { message = "Checklist not found" });
+                return BadRequest(new { error = "Checklist ID is required" });
             }
 
-            checklist.Status = request.Status;
+            var checklist = await _context.Checklists
+                .Include(c => c.Documents)
+                    .ThenInclude(cat => cat.DocList)
+                .Include(c => c.CreatedBy)
+                .Include(c => c.AssignedToRM)
+                .FirstOrDefaultAsync(c => c.Id == request.Id.Value);
+
+            if (checklist == null)
+            {
+                return NotFound(new { error = "Checklist not found" });
+            }
+
+            // Determine new status from action
+            ChecklistStatus newStatus;
+            if (request.Action?.ToLower() == "approved") newStatus = ChecklistStatus.Approved;
+            else if (request.Action?.ToLower() == "rejected") newStatus = ChecklistStatus.Rejected;
+            else if (request.Action?.ToLower() == "co_creator_review") newStatus = ChecklistStatus.CoCreatorReview;
+            else return BadRequest(new { error = $"Invalid action: {request.Action}" });
+
+            // Create a map of document updates for easy lookup
+            var updatesMap = new Dictionary<string, (CheckerStatus? Status, string? Comment)>();
+            if (request.CheckerDecisions?.Any() == true)
+            {
+                foreach (var decision in request.CheckerDecisions)
+                {
+                    if (decision.DocumentId.HasValue)
+                    {
+                        if (Enum.TryParse<CheckerStatus>(decision.CheckerStatus, ignoreCase: true, out var checkerStatus))
+                        {
+                            updatesMap[decision.DocumentId.Value.ToString()] = (checkerStatus, decision.CheckerComment);
+                        }
+                    }
+                }
+            }
+
+            // Update documents
+            foreach (var category in checklist.Documents)
+            {
+                foreach (var doc in category.DocList)
+                {
+                    var docIdStr = doc.Id.ToString();
+                    CheckerStatus finalCheckerStatus;
+
+                    if (updatesMap.ContainsKey(docIdStr))
+                    {
+                        // Use the update from frontend
+                        finalCheckerStatus = updatesMap[docIdStr].Status ?? doc.CheckerStatus;
+                        if (!string.IsNullOrWhiteSpace(updatesMap[docIdStr].Comment))
+                        {
+                            doc.CheckerComment = updatesMap[docIdStr].Comment;
+                        }
+                    }
+                    else if (newStatus == ChecklistStatus.Approved)
+                    {
+                        // If approving entire checklist, all become approved
+                        finalCheckerStatus = CheckerStatus.Approved;
+                    }
+                    else if (newStatus == ChecklistStatus.Rejected)
+                    {
+                        // If rejecting entire checklist, all become rejected
+                        finalCheckerStatus = CheckerStatus.Rejected;
+                    }
+                    else
+                    {
+                        // Keep existing status if returning to co_creator_review
+                        finalCheckerStatus = doc.CheckerStatus;
+                    }
+
+                    doc.CheckerStatus = finalCheckerStatus;
+                }
+            }
+
+            // Update overall checklist status
+            checklist.Status = newStatus;
+            checklist.LastUpdatedBy = userId;
+            checklist.UpdatedAt = DateTime.UtcNow;
+
+            // Log Audit
+            await _auditLogService.CreateLogAsync(new DTOs.AuditLogCreateDto
+            {
+                Action = $"CHECKER_{request.Action?.ToUpper()}",
+                Resource = "CHECKLIST",
+                PerformedById = userId,
+                TargetUserId = checklist.CreatedById,
+                Status = "success",
+                Details = $"DCL {checklist.DclNo} updated to {newStatus}"
+            });
+
+            // Email notifications
+            try
+            {
+                var checker = await _context.Users.FindAsync(userId);
+                var checkerName = checker?.Name ?? "Checker";
+
+                var coCreator = await _context.Users.FindAsync(checklist.CreatedById);
+                var rmUser = checklist.AssignedToRMId.HasValue
+                    ? await _context.Users.FindAsync(checklist.AssignedToRMId.Value)
+                    : null;
+
+                if (newStatus == ChecklistStatus.Approved)
+                {
+                    if (coCreator?.Email != null)
+                        await _emailService.SendCheckerApprovedAsync(
+                            coCreator.Email, coCreator.Name,
+                            checklist.Id.ToString(), checklist.DclNo, checkerName);
+
+                    if (rmUser?.Email != null)
+                        await _emailService.SendCheckerApprovedAsync(
+                            rmUser.Email, rmUser.Name,
+                            checklist.Id.ToString(), checklist.DclNo, checkerName);
+                }
+
+                if (newStatus == ChecklistStatus.CoCreatorReview || newStatus == ChecklistStatus.Rejected)
+                {
+                    if (coCreator?.Email != null)
+                        await _emailService.SendCheckerReturnedAsync(
+                            coCreator.Email, coCreator.Name,
+                            checklist.Id.ToString(), checklist.DclNo, checkerName);
+
+                    if (rmUser?.Email != null)
+                        await _emailService.SendCheckerReturnedAsync(
+                            rmUser.Email, rmUser.Name,
+                            checklist.Id.ToString(), checklist.DclNo, checkerName);
+                }
+            }
+            catch (Exception emailError)
+            {
+                _logger.LogError(emailError, "❌ EMAIL FAILURE (non-blocking)");
+            }
+
+            // In-app notifications
+            var notifications = new List<Notification>();
+
+            if (checklist.CreatedById.HasValue)
+            {
+                notifications.Add(new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = checklist.CreatedById.Value,
+                    Message = $"DCL {checklist.DclNo ?? checklist.Id.ToString()} was {newStatus}.",
+                    Read = false,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+
+            if (checklist.AssignedToRMId.HasValue)
+            {
+                notifications.Add(new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = checklist.AssignedToRMId.Value,
+                    Message = $"DCL {checklist.DclNo ?? checklist.Id.ToString()} was {newStatus}.",
+                    Read = false,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+
+            if (notifications.Count > 0)
+            {
+                _context.Notifications.AddRange(notifications);
+            }
+
             await _context.SaveChangesAsync();
 
-            return Ok(new { message = "Status updated successfully", status = checklist.Status.ToString() });
+            return Ok(new
+            {
+                message = $"Checklist/document successfully updated to {newStatus}",
+                checklist
+            });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating status");
-            return StatusCode(500, new { message = "Internal server error" });
+            _logger.LogError(ex, "Checker status update error");
+            return StatusCode(500, new { error = "Failed to process checker action" });
         }
     }
 
     // GET /api/checkerChecklist/reports/:checkerId
+    // Aligns with Node.js: Returns counts for dashboard
     [HttpGet("reports/{checkerId}")]
     public async Task<IActionResult> GetReports(Guid checkerId)
     {
         try
         {
-            var totalAssigned = await _context.Checklists
-                .CountAsync(c => c.AssignedToCoCheckerId == checkerId);
+            _logger.LogInformation($"🔍 Fetching reports for checker: {checkerId}");
 
-            var completed = await _context.Checklists
-                .CountAsync(c => c.AssignedToCoCheckerId == checkerId &&
-                               c.Status == ChecklistStatus.Approved);
+            var myQueueCount = await _context.Checklists.CountAsync(c =>
+                c.AssignedToCoCheckerId == checkerId &&
+                c.Status == ChecklistStatus.CoCheckerReview);
 
-            var pending = await _context.Checklists
-                .CountAsync(c => c.AssignedToCoCheckerId == checkerId &&
-                               c.Status == ChecklistStatus.CoCheckerReview);
+            var activeDclsCount = await _context.Checklists.CountAsync(c =>
+                c.Status == ChecklistStatus.CoCreatorReview);
 
-            var rejected = await _context.Checklists
-                .CountAsync(c => c.AssignedToCoCheckerId == checkerId &&
-                               c.Status == ChecklistStatus.Rejected);
+            var completedCount = await _context.Checklists.CountAsync(c =>
+                c.AssignedToCoCheckerId == checkerId &&
+                c.Status == ChecklistStatus.Approved);
+
+            _logger.LogInformation($"📊 Reports - Queue: {myQueueCount}, Active: {activeDclsCount}, Completed: {completedCount}");
 
             return Ok(new
             {
-                totalAssigned,
-                completed,
-                pending,
-                rejected,
-                completionRate = totalAssigned > 0 ? (double)completed / totalAssigned * 100 : 0
+                myQueue = myQueueCount,
+                activeDcls = activeDclsCount,
+                completed = completedCount
             });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching reports");
-            return StatusCode(500, new { message = "Internal server error" });
+            _logger.LogError(ex, "🔥 Reports API Error");
+            return StatusCode(500, new { error = ex.Message });
         }
     }
 

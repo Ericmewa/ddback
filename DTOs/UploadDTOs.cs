@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using System;
+using System.Text.Json.Serialization;
 
 namespace NCBA.DCL.DTOs
 {
