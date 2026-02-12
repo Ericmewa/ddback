@@ -721,35 +721,53 @@ public class CoCreatorController : ControllerBase
         {
             _logger.LogInformation($"📝 Fetching comments for checklist: {checklistId}");
             
+            // Validate checklistId first
+            if (checklistId == Guid.Empty)
+            {
+                return BadRequest(new { message = "Invalid checklist ID" });
+            }
+
+            // Check if checklist exists
+            var checklistExists = await _context.Checklists.AnyAsync(c => c.Id == checklistId);
+            if (!checklistExists)
+            {
+                _logger.LogWarning($"⚠️  Checklist not found: {checklistId}");
+                return NotFound(new { message = "Checklist not found" });
+            }
+
+            // Fetch all logs for this checklist with user info eagerly loaded
             var logs = await _context.ChecklistLogs
                 .Where(l => l.ChecklistId == checklistId)
                 .Include(l => l.User)
                 .OrderBy(l => l.Timestamp) // Chronological order: oldest to newest
                 .ToListAsync();
             
-            _logger.LogInformation($"   Found {logs.Count} comment logs");
+            _logger.LogInformation($"   Found {logs.Count} comment logs for checklist {checklistId}");
 
-            var result = logs.Select(l => 
+            // Map logs to response format
+            var result = new List<dynamic>();
+            
+            foreach (var l in logs)
             {
                 try
                 {
-                    return new
+                    var commentData = new
                     {
                         _id = l.Id,
                         id = l.Id,
-                        message = l.Message,
+                        message = l.Message ?? "",
                         userId = l.User != null ? new
                         {
                             id = l.User.Id,
-                            name = l.User.Name,
-                            email = l.User.Email,
+                            name = l.User.Name ?? "Unknown",
+                            email = l.User.Email ?? "",
                             role = l.User.Role.ToString()
                         } : null,
                         user = l.User != null ? new
                         {
                             id = l.User.Id,
-                            name = l.User.Name,
-                            email = l.User.Email,
+                            name = l.User.Name ?? "Unknown",
+                            email = l.User.Email ?? "",
                             role = l.User.Role.ToString()
                         } : null,
                         roleInfo = l.User != null ? new
@@ -761,15 +779,28 @@ public class CoCreatorController : ControllerBase
                         createdAt = l.Timestamp,
                         timestamp = l.Timestamp
                     };
+                    result.Add(commentData);
                 }
                 catch (Exception logEx)
                 {
-                    _logger.LogError(logEx, $"❌ Error mapping log entry {l.Id}: {logEx.Message}");
-                    throw;
+                    _logger.LogError(logEx, $"❌ Error mapping log entry {l.Id}: {logEx.GetType().Name} - {logEx.Message}");
+                    // Don't fail the entire response, log the error and continue
+                    result.Add(new
+                    {
+                        _id = l.Id,
+                        id = l.Id,
+                        message = $"[Error loading comment: {logEx.Message}]",
+                        userId = (object)null,
+                        user = (object)null,
+                        roleInfo = (object)null,
+                        createdAt = l.Timestamp,
+                        timestamp = l.Timestamp,
+                        error = logEx.Message
+                    });
                 }
-            }).ToList();
+            }
             
-            _logger.LogInformation($"✅ Successfully mapped {result.Count} comments");
+            _logger.LogInformation($"✅ Successfully mapped {result.Count} comments for checklist {checklistId}");
             return Ok(result);
         }
         catch (Exception ex)
@@ -777,12 +808,13 @@ public class CoCreatorController : ControllerBase
             _logger.LogError(ex, $"❌ CRITICAL ERROR fetching comments for {checklistId}: {ex.GetType().Name} - {ex.Message}");
             if (ex.InnerException != null)
             {
-                _logger.LogError(ex.InnerException, $"   Inner Exception: {ex.InnerException.Message}");
+                _logger.LogError(ex.InnerException, $"   Inner Exception: {ex.InnerException.GetType().Name} - {ex.InnerException.Message}");
             }
             return StatusCode(500, new { 
-                message = "Internal server error", 
+                message = "Internal server error fetching comments", 
                 error = ex.Message,
-                type = ex.GetType().Name
+                type = ex.GetType().Name,
+                checklistId = checklistId.ToString()
             });
         }
     }
