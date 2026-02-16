@@ -421,6 +421,7 @@ public class CoCreatorController : ControllerBase
                             rmStatus = d.RmStatus.ToString().ToLower(),
                             fileUrl = d.FileUrl,
                             comment = d.Comment,
+                            checkerComment = d.CheckerComment,
                             deferralNumber = d.DeferralNumber
                         }).ToList()
                     }).ToList(),
@@ -474,9 +475,12 @@ public class CoCreatorController : ControllerBase
                             id = d.Id,
                             name = d.Name,
                             status = d.Status.ToString().ToLower(),
+                            creatorStatus = d.CreatorStatus.HasValue ? d.CreatorStatus.ToString().ToLower() : null,
+                            checkerStatus = d.CheckerStatus.ToString().ToLower(),
                             rmStatus = d.RmStatus.ToString().ToLower(),
                             fileUrl = d.FileUrl,
                             comment = d.Comment,
+                            checkerComment = d.CheckerComment,
                             deferralNumber = d.DeferralNumber,
                             deferralNo = d.DeferralNumber
                         }).ToList()
@@ -655,6 +659,7 @@ public class CoCreatorController : ControllerBase
                         rmStatus = d.RmStatus.ToString().ToLower(),
                         fileUrl = d.FileUrl,
                         comment = d.Comment,
+                        checkerComment = d.CheckerComment,
                         deferralNumber = d.DeferralNumber
                     }).ToList()
                 }).ToList(),
@@ -669,6 +674,8 @@ public class CoCreatorController : ControllerBase
                     uploadedByRole = sd.UploadedByRole,
                     uploadedAt = sd.UploadedAt
                 }).ToList(),
+                generalComment = checklist.GeneralComment,
+                finalComment = checklist.FinalComment,
                 createdAt = checklist.CreatedAt,
                 updatedAt = checklist.UpdatedAt
             });
@@ -920,6 +927,8 @@ public class CoCreatorController : ControllerBase
                             name = d.Name,
                             status = d.Status.ToString().ToLower(),
                             creatorStatus = d.CreatorStatus.HasValue ? d.CreatorStatus.ToString().ToLower() : null,
+                            checkerStatus = d.CheckerStatus.ToString().ToLower(),
+                            checkerComment = d.CheckerComment,
                             rmStatus = d.RmStatus.ToString().ToLower(),
                             fileUrl = d.FileUrl,
                             comment = d.Comment,
@@ -1104,18 +1113,30 @@ public class CoCreatorController : ControllerBase
             /* ============================================================
                DOCUMENT UPDATE � UPDATE IN PLACE (NO REPLACEMENT)
             ============================================================ */
+            // 🔍 CRITICAL DEBUG: Log incoming document updates
+            _logger.LogWarning($"📥 SUBMISSION FROM CO-CREATOR: DCL {request.DclNo}");
+            _logger.LogWarning($"   📦 Documents in request: {request.Documents?.Count ?? 0}");
+            if (request.Documents != null)
+            {
+                foreach (var doc in request.Documents)
+                {
+                    _logger.LogWarning($"      - {doc.Id ?? doc._id}: Category={doc.Category}, Status={doc.Status}, CreatorStatus={doc.CreatorStatus}");
+                }
+            }
+
             if (request.Documents != null && request.Documents.Any())
             {
+                // Build a map of all existing documents for quick lookup
                 var existingDocsMap = new Dictionary<Guid, Document>();
-
-                foreach (var cat in checklist.Documents)
+                foreach (var category in checklist.Documents)
                 {
-                    foreach (var doc in cat.DocList)
+                    foreach (var doc in category.DocList)
                     {
                         existingDocsMap[doc.Id] = doc;
                     }
                 }
 
+                // Process FLAT list of documents from frontend
                 foreach (var docFromRequest in request.Documents)
                 {
                     var docId = docFromRequest.Id ?? docFromRequest._id;
@@ -1125,13 +1146,13 @@ public class CoCreatorController : ControllerBase
                         // UPDATE EXISTING DOCUMENT IN PLACE
                         var existingDoc = existingDocsMap[docId.Value];
                         
-                        _logger.LogInformation($"🔧 UPDATING: {existingDoc.Name} (ID: {docId});");
+                        _logger.LogInformation($"🔧 UPDATING: {existingDoc.Name} (ID: {docId})");
                         _logger.LogInformation($"   Old CreatorStatus: {existingDoc.CreatorStatus}");
                         _logger.LogInformation($"   Old Status: {existingDoc.Status}");
 
                         existingDoc.Name = docFromRequest.Name ?? existingDoc.Name;
 
-                        // Only update status if provided, otherwise preserve last actioned status
+                        // Only update status if provided
                         DocumentStatus? newStatus = null;
                         if (docFromRequest.Status != null)
                         {
@@ -1139,15 +1160,14 @@ public class CoCreatorController : ControllerBase
                             if (parsedStatus.HasValue)
                             {
                                 existingDoc.Status = parsedStatus.Value;
-                                newStatus = parsedStatus.Value; // Track the NEW status for CreatorStatus mapping
+                                newStatus = parsedStatus.Value;
                                 _logger.LogInformation($"   New Status: {existingDoc.Status}");
                             }
                         }
                         
-                        // Preserve/Set CreatorStatus (coStatus) - CRITICAL FOR PERSISTENCE
+                        // CRITICAL: Set CreatorStatus from request or derive from Status
                         if (docFromRequest.CreatorStatus != null)
                         {
-                            // Accept lowercase string and map to enum
                             if (Enum.TryParse<CreatorStatus>(docFromRequest.CreatorStatus.ToString(), true, out var parsedCreatorStatus))
                             {
                                 existingDoc.CreatorStatus = parsedCreatorStatus;
@@ -1156,35 +1176,50 @@ public class CoCreatorController : ControllerBase
                         }
                         else if (newStatus.HasValue)
                         {
-                            // Map the NEW DocumentStatus to CreatorStatus (not the old value!)
                             existingDoc.CreatorStatus = MapDocumentStatusToCreatorStatus(newStatus.Value);
                             _logger.LogInformation($"   ✅ Mapped CreatorStatus from Status: {existingDoc.CreatorStatus}");
                         }
                         else if (!existingDoc.CreatorStatus.HasValue && existingDoc.Status != DocumentStatus.Pending && existingDoc.Status != DocumentStatus.PendingRM)
                         {
-                            // Initialize CreatorStatus based on current Status if not yet set
                             existingDoc.CreatorStatus = MapDocumentStatusToCreatorStatus(existingDoc.Status);
                             _logger.LogInformation($"   ✅ Initialized CreatorStatus: {existingDoc.CreatorStatus}");
-                        }
-                        else
-                        {
-                            _logger.LogInformation($"   ⚠️ CreatorStatus not modified: {existingDoc.CreatorStatus}");
                         }
 
                         existingDoc.Comment = docFromRequest.Comment ?? existingDoc.Comment;
                         existingDoc.FileUrl = docFromRequest.FileUrl ?? existingDoc.FileUrl;
                         existingDoc.DeferralReason = docFromRequest.DeferralReason ?? existingDoc.DeferralReason;
 
-                        // Update deferral number if provided
                         if (!string.IsNullOrWhiteSpace(docFromRequest.DeferralNo))
                         {
                             existingDoc.DeferralNumber = docFromRequest.DeferralNo;
                         }
 
                         existingDoc.UpdatedAt = DateTime.UtcNow;
-
-                        // Explicitly mark the entity as modified to ensure EF Core tracks the change
                         _context.Entry(existingDoc).State = EntityState.Modified;
+                    }
+                    else if (docId.HasValue)
+                    {
+                        _logger.LogWarning($"⚠️  Document {docId} from request not found in checklist!");
+                    }
+                }
+            }
+            else
+            {
+                // ⚠️ WARNING: No documents sent from frontend!
+                _logger.LogWarning($"⚠️  NO DOCUMENTS IN SUBMISSION REQUEST!");
+                _logger.LogWarning($"   Existing documents in checklist: {checklist.Documents.Sum(cat => cat.DocList.Count)}");
+                _logger.LogWarning($"   These documents will be PRESERVED but their statuses might not update");
+                
+                // Safety: Mark all documents as viewed by creator if they don't have CreatorStatus
+                foreach (var category in checklist.Documents)
+                {
+                    foreach (var doc in category.DocList)
+                    {
+                        if (!doc.CreatorStatus.HasValue)
+                        {
+                            doc.CreatorStatus = CreatorStatus.Sighted;
+                            _context.Entry(doc).State = EntityState.Modified;
+                        }
                     }
                 }
             }
@@ -1211,9 +1246,15 @@ public class CoCreatorController : ControllerBase
 
                 checklist.AssignedToCoCheckerId = checkerId.Value;
             }
+            else if (checklist.AssignedToCoCheckerId.HasValue)
+            {
+                // ✅ PRESERVE existing checker if already assigned (e.g., returned from checker for rework)
+                _logger.LogInformation($"✅ Preserving existing Co-Checker: {checklist.AssignedToCoCheckerId}");
+                // Keep the existing checker - don't reassign to a new one
+            }
             else
             {
-                // Find least busy Co-Checker (optional - you may implement this logic)
+                // Find least busy Co-Checker (only if never assigned before)
                 var leastBusyChecker = await _context.Users
                     .Where(u => u.Role == UserRole.CoChecker)
                     .FirstOrDefaultAsync();
@@ -1223,6 +1264,7 @@ public class CoCreatorController : ControllerBase
                     return BadRequest(new { error = "No available Co-Checker found" });
                 }
 
+                _logger.LogInformation($"✅ Assigning to new Co-Checker: {leastBusyChecker.Id}");
                 checklist.AssignedToCoCheckerId = leastBusyChecker.Id;
             }
 
@@ -1347,6 +1389,16 @@ public class CoCreatorController : ControllerBase
                 .Include(c => c.CreatedBy)
                 .FirstOrDefaultAsync(c => c.Id == checklist.Id);
 
+            // 🔍 LOG WHAT'S BEING RETURNED
+            _logger.LogWarning($"📤 RESPONSE TO FRONTEND: {updatedChecklist.Documents.Count} document categories");
+            foreach (var category in updatedChecklist.Documents)
+            {
+                foreach (var doc in category.DocList)
+                {
+                    _logger.LogWarning($"   📄 {doc.Name}: Status={doc.Status}, CreatorStatus={doc.CreatorStatus}, CheckerStatus={doc.CheckerStatus}");
+                }
+            }
+
             // Return flat response to avoid circular references
             return Ok(new
             {
@@ -1373,6 +1425,7 @@ public class CoCreatorController : ControllerBase
                             status = d.Status.ToString().ToLower(),
                             creatorStatus = d.CreatorStatus.HasValue ? d.CreatorStatus.ToString().ToLower() : null,
                             checkerStatus = d.CheckerStatus.ToString().ToLower(),
+                            checkerComment = d.CheckerComment,
                             rmStatus = d.RmStatus.ToString().ToLower(),
                             fileUrl = d.FileUrl,
                             comment = d.Comment,

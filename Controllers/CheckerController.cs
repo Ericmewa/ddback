@@ -584,9 +584,9 @@ public class CheckerController : ControllerBase
 
                     if (updatesMap.ContainsKey(docIdStr))
                     {
-                        // Use the update from frontend
+                        // Use the update from frontend - checker explicitly set this document's status
                         finalCheckerStatus = updatesMap[docIdStr].Status ?? doc.CheckerStatus;
-                        _logger.LogInformation($"   ✅ New CheckerStatus: {finalCheckerStatus}");
+                        _logger.LogInformation($"   ✅ New CheckerStatus from decision: {finalCheckerStatus}");
                         if (!string.IsNullOrWhiteSpace(updatesMap[docIdStr].Comment))
                         {
                             doc.CheckerComment = updatesMap[docIdStr].Comment;
@@ -596,14 +596,26 @@ public class CheckerController : ControllerBase
                     {
                         // If approving entire checklist, all become approved
                         finalCheckerStatus = CheckerStatus.Approved;
+                        _logger.LogInformation($"   ✅ Set to Approved (whole checklist approved)");
                     }
                     else if (newStatus == ChecklistStatus.Rejected)
                     {
                         // If rejecting entire checklist, all become rejected
                         finalCheckerStatus = CheckerStatus.Rejected;
+                        _logger.LogInformation($"   ✅ Set to Rejected (whole checklist rejected)");
                     }
-                    // else if returning to co_creator_review, preserve last checker status (do not reset to pending)
-                    // Do nothing: keep doc.CheckerStatus as is
+                    else if (newStatus == ChecklistStatus.CoCreatorReview)
+                    {
+                        // When returning to CoCreator for review/changes
+                        // If no specific decision was made for this document, keep existing CheckerStatus
+                        // (which should have been set in a previous review cycle)
+                        _logger.LogInformation($"   ℹ️ Returning for review - preserving CheckerStatus: {finalCheckerStatus}");
+                    }
+                    else
+                    {
+                        // For any other status, preserve the existing checker status
+                        _logger.LogInformation($"   ℹ️ Preserving CheckerStatus: {finalCheckerStatus}");
+                    }
 
                     doc.CheckerStatus = finalCheckerStatus;
                     doc.UpdatedAt = DateTime.UtcNow; // Ensure document update timestamp is set
@@ -755,6 +767,8 @@ public class CheckerController : ControllerBase
                     id = updatedChecklist.Id,
                     dclNo = updatedChecklist.DclNo,
                     status = updatedChecklist.Status.ToString(),
+                    generalComment = updatedChecklist.GeneralComment,
+                    finalComment = updatedChecklist.FinalComment,
                     documents = updatedChecklist.Documents.Select(dc => new
                     {
                         id = dc.Id,
