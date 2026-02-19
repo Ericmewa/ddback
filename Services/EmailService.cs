@@ -1,367 +1,563 @@
-using System;
+
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 using System.Net;
 using System.Net.Mail;
-using System.Text;
-using System.Threading.Tasks;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
 
-namespace NCBA.DCL.Services
+namespace NCBA.DCL.Services;
+
+public class EmailService : IEmailService
 {
-    public class EmailService : IEmailService
-    {
-        private readonly IConfiguration _configuration;
-        private readonly ILogger<EmailService> _logger;
+    private readonly ILogger<EmailService> _logger;
+    private readonly IConfiguration _configuration;
+    private readonly string? _smtpHost;
+    private readonly int _smtpPort;
+    private readonly string? _smtpUser;
+    private readonly string? _smtpPass;
+    private readonly bool _smtpSecure;
+    private readonly string? _emailFrom;
+    private readonly string _loginUrl;
 
-        public EmailService(IConfiguration configuration, ILogger<EmailService> logger)
+    public EmailService(ILogger<EmailService> logger, IConfiguration configuration)
+    {
+        _logger = logger;
+        _configuration = configuration;
+
+        // Read SMTP configuration from environment or appsettings
+        _smtpHost =
+            configuration["EmailSettings:SmtpHost"]
+            ?? Environment.GetEnvironmentVariable("SMTP_HOST")
+            ?? Environment.GetEnvironmentVariable("EMAIL_HOST");
+
+        var smtpPortRaw =
+            configuration["EmailSettings:SmtpPort"]
+            ?? Environment.GetEnvironmentVariable("SMTP_PORT")
+            ?? Environment.GetEnvironmentVariable("EMAIL_PORT");
+        _smtpPort = int.TryParse(smtpPortRaw, out var port) ? port : 587;
+
+        _smtpUser =
+            configuration["EmailSettings:SmtpUser"]
+            ?? Environment.GetEnvironmentVariable("SMTP_USER")
+            ?? Environment.GetEnvironmentVariable("EMAIL_USER");
+
+        _smtpPass =
+            configuration["EmailSettings:SmtpPass"]
+            ?? Environment.GetEnvironmentVariable("SMTP_PASS")
+            ?? Environment.GetEnvironmentVariable("EMAIL_PASS");
+
+        var smtpSecureRaw =
+            configuration["EmailSettings:SmtpSecure"]
+            ?? Environment.GetEnvironmentVariable("SMTP_SECURE");
+        if (!string.IsNullOrWhiteSpace(smtpSecureRaw))
         {
-            _configuration = configuration;
-            _logger = logger;
+            _smtpSecure = smtpSecureRaw.Equals("true", StringComparison.OrdinalIgnoreCase);
+        }
+        else
+        {
+            _smtpSecure = _smtpPort == 465 || _smtpPort == 587;
         }
 
-        public async Task<bool> SendEmailAsync(string toEmail, string subject, string htmlContent)
+        _emailFrom =
+            configuration["EmailSettings:EmailFrom"]
+            ?? Environment.GetEnvironmentVariable("EMAIL_FROM")
+            ?? _smtpUser;
+
+        _loginUrl =
+            configuration["EmailSettings:LoginUrl"]
+            ?? configuration["Frontend:LoginUrl"]
+            ?? Environment.GetEnvironmentVariable("APP_LOGIN_URL")
+            ?? Environment.GetEnvironmentVariable("APP_URL")
+            ?? "http://localhost:5173/login";
+
+        // Log configuration status
+        LogEmailConfig();
+    }
+
+    private void LogEmailConfig()
+    {
+        _logger.LogInformation("📧 Email Service Config: " +
+            $"SMTP_HOST: {(_smtpHost != null ? "✅ set" : "❌ missing")}, " +
+            $"SMTP_PORT: {(_smtpPort > 0 ? "✅ set" : "❌ missing")}, " +
+            $"SMTP_USER: {(_smtpUser != null ? "✅ set" : "❌ missing")}, " +
+            $"SMTP_SECURE: {(_smtpSecure ? "✅ true" : "❌ false")}, " +
+            $"EMAIL_FROM: {(_emailFrom != null ? $"✅ {_emailFrom}" : "❌ missing")}, " +
+            $"LOGIN_URL: {(!string.IsNullOrWhiteSpace(_loginUrl) ? $"✅ {_loginUrl}" : "❌ missing")}");
+    }
+
+    private string BuildLoginButtonHtml()
+    {
+        var loginHref = string.IsNullOrWhiteSpace(_loginUrl)
+            ? "http://localhost:5173/login"
+            : _loginUrl.Trim();
+
+        return $@"
+            <div style=""margin: 20px 0;"">
+                <a href=""{loginHref}"" data-login-button=""true"" style=""
+                    display: inline-block;
+                    background-color: #164679;
+                    color: #ffffff;
+                    text-decoration: none;
+                    padding: 10px 18px;
+                    border-radius: 6px;
+                    font-weight: 600;
+                    font-family: Arial, sans-serif;
+                "">Login to DCL System</a>
+            </div>";
+    }
+
+    private string EnsureLoginButtonInEmail(string htmlBody)
+    {
+        if (string.IsNullOrWhiteSpace(htmlBody))
         {
-            try
+            return htmlBody;
+        }
+
+        if (htmlBody.Contains("data-login-button=\"true\"", StringComparison.OrdinalIgnoreCase))
+        {
+            return htmlBody;
+        }
+
+        var loginButtonHtml = BuildLoginButtonHtml();
+        var bodyClosingTag = "</body>";
+        var closingIndex = htmlBody.LastIndexOf(bodyClosingTag, StringComparison.OrdinalIgnoreCase);
+
+        if (closingIndex >= 0)
+        {
+            return htmlBody.Insert(closingIndex, loginButtonHtml + Environment.NewLine);
+        }
+
+        return htmlBody + Environment.NewLine + loginButtonHtml;
+    }
+
+    // ✅ Generic email sending method (aligns with Node.js sendEmail)
+    private async Task SendEmailAsync(string to, string subject, string htmlBody)
+    {
+        if (string.IsNullOrWhiteSpace(to) || string.IsNullOrWhiteSpace(subject) || string.IsNullOrWhiteSpace(htmlBody))
+        {
+            throw new ArgumentException("Email parameters: to, subject, and htmlBody are required");
+        }
+
+        htmlBody = EnsureLoginButtonInEmail(htmlBody);
+
+        // If SMTP not configured, log and return (non-blocking)
+        if (string.IsNullOrWhiteSpace(_smtpHost) || string.IsNullOrWhiteSpace(_smtpUser))
+        {
+            _logger.LogWarning($"⚠️ SMTP not configured. Email not sent TO: {to} | Subject: {subject}");
+            return;
+        }
+
+        try
+        {
+            using (var client = new SmtpClient(_smtpHost, _smtpPort))
             {
-                var smtpServer = _configuration["EmailSettings:SmtpServer"];
-                var smtpPort = int.Parse(_configuration["EmailSettings:SmtpPort"] ?? "587");
-                var senderEmail = _configuration["EmailSettings:SenderEmail"];
-                var senderPassword = _configuration["EmailSettings:SenderPassword"];
+                client.EnableSsl = _smtpSecure;
+                client.Credentials = new NetworkCredential(_smtpUser, _smtpPass);
+                client.Timeout = 10000; // 10 second timeout
 
-                using (var client = new SmtpClient(smtpServer, smtpPort))
+                using (var mailMessage = new MailMessage(_emailFrom ?? _smtpUser, to))
                 {
-                    client.EnableSsl = true;
-                    client.Credentials = new NetworkCredential(senderEmail, senderPassword);
-
-                    var mailMessage = new MailMessage
-                    {
-                        From = new MailAddress(senderEmail),
-                        Subject = subject,
-                        Body = htmlContent,
-                        IsBodyHtml = true
-                    };
-
-                    mailMessage.To.Add(toEmail);
+                    mailMessage.Subject = subject;
+                    mailMessage.Body = htmlBody;
+                    mailMessage.IsBodyHtml = true;
 
                     await client.SendMailAsync(mailMessage);
-                    _logger.LogInformation($"Email sent successfully to {toEmail}");
+                    _logger.LogInformation($"✅ [EMAIL SENT] To: {to} | Subject: {subject}");
                 }
-
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error sending email to {toEmail}: {ex.Message}");
-                return false;
             }
         }
-
-        public async Task<bool> SendEmailVerificationCodeAsync(string toEmail, string code, int expiryMinutes = 15)
+        catch (Exception ex)
         {
-            var htmlContent = BuildEmailVerificationHtml(code, expiryMinutes);
-            return await SendEmailAsync(toEmail, "Email Verification Code", htmlContent);
+            _logger.LogError(ex, $"❌ Failed to send email to {to}. Subject: {subject}");
+            // Non-blocking: don't throw, just log the error
         }
+    }
 
-        public async Task<bool> SendLogoutVerificationEmailAsync(string toEmail, string userName, string code, string ipAddress, string userAgent)
-        {
-            var deviceInfo = ExtractDeviceInfoFromUserAgent(userAgent);
-            var htmlContent = BuildLogoutVerificationHtml(code, userName, ipAddress, deviceInfo);
-            return await SendEmailAsync(toEmail, "Logout Verification Required", htmlContent);
-        }
+    // ✅ HTML template for checker status changed
+    private string GetDeferralSubmittedHtml(string userName, string deferralNumber, string customerName, int daysSought, string recipientRole)
+    {
+        return $@"
+            <html>
+                <body style=""font-family: Arial, sans-serif; color: #333;"">
+                    <h2>Deferral Submitted</h2>
+                    <p>Hello {userName},</p>
+                    <p>A deferral request has been submitted with details below:</p>
+                    <ul>
+                        <li><strong>Deferral Number:</strong> {deferralNumber}</li>
+                        <li><strong>Customer:</strong> {customerName}</li>
+                        <li><strong>Days Sought:</strong> {daysSought}</li>
+                    </ul>
+                    <p><strong>Recipient:</strong> {recipientRole}</p>
+                    <p>Please log in to the system to review.</p>
+                    <hr>
+                    <p>This is an automated email. Please do not reply.</p>
+                </body>
+            </html>";
+    }
 
-        public async Task<bool> SendMFAEnabledNotificationAsync(string toEmail, string userName, int backupCodeCount = 10)
-        {
-            var htmlContent = BuildMFAEnabledHtml(userName, backupCodeCount);
-            return await SendEmailAsync(toEmail, "Multi-Factor Authentication Enabled", htmlContent);
-        }
+    private string GetDeferralReminderHtml(string userName, string deferralNumber, string customerName)
+    {
+        return $@"
+            <html>
+                <body style=""font-family: Arial, sans-serif; color: #333;"">
+                    <h2>Deferral Reminder</h2>
+                    <p>Hello {userName},</p>
+                    <p>This is a reminder that deferral <strong>{deferralNumber}</strong> for customer <strong>{customerName}</strong> is awaiting your approval.</p>
+                    <p>Please log in to the system and take action.</p>
+                    <hr>
+                    <p>This is an automated email. Please do not reply.</p>
+                </body>
+            </html>";
+    }
 
-        private string BuildEmailVerificationHtml(string code, int expiryMinutes)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("<!DOCTYPE html>");
-            sb.AppendLine("<html>");
-            sb.AppendLine("<head>");
-            sb.AppendLine("<meta charset='UTF-8'>");
-            sb.AppendLine("<style>");
-            sb.AppendLine("body { font-family: Arial, sans-serif; background-color: #f5f5f5; }");
-            sb.AppendLine(".container { max-width: 600px; margin: 20px auto; background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }");
-            sb.AppendLine(".header { text-align: center; color: #333; margin-bottom: 20px; }");
-            sb.AppendLine(".code-box { background-color: #f9f9f9; border: 2px solid #2196F3; padding: 20px; text-align: center; margin: 20px 0; border-radius: 4px; }");
-            sb.AppendLine(".code { font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #2196F3; }");
-            sb.AppendLine(".message { color: #666; line-height: 1.6; margin: 15px 0; }");
-            sb.AppendLine(".footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px; }");
-            sb.AppendLine("</style>");
-            sb.AppendLine("</head>");
-            sb.AppendLine("<body>");
-            sb.AppendLine("<div class='container'>");
-            sb.AppendLine("<div class='header'><h2>Email Verification</h2></div>");
-            sb.AppendLine("<p class='message'>Hello,</p>");
-            sb.AppendLine("<p class='message'>Your email verification code is:</p>");
-            sb.AppendLine("<div class='code-box'>");
-            sb.AppendLine($"<div class='code'>{code}</div>");
-            sb.AppendLine("</div>");
-            sb.AppendLine($"<p class='message'>This code will expire in <strong>{expiryMinutes} minutes</strong>.</p>");
-            sb.AppendLine("<p class='message'>If you did not request this verification, please ignore this email.</p>");
-            sb.AppendLine("<div class='footer'>");
-            sb.AppendLine("<p>This is an automated email. Please do not reply to this message.</p>");
-            sb.AppendLine("</div>");
-            sb.AppendLine("</div>");
-            sb.AppendLine("</body>");
-            sb.AppendLine("</html>");
-            return sb.ToString();
-        }
+    private string GetDeferralApprovalConfirmationHtml(string userName, string deferralNumber, string customerName, string? nextApproverName, bool isFinalApproval)
+    {
+        var nextStep = isFinalApproval
+            ? "This was the final approval step. The deferral is now fully approved."
+            : $"The deferral has now moved to the next approver: <strong>{(string.IsNullOrWhiteSpace(nextApproverName) ? "Next Approver" : nextApproverName)}</strong>.";
 
-        private string BuildLogoutVerificationHtml(string code, string userName, string ipAddress, string deviceInfo)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("<!DOCTYPE html>");
-            sb.AppendLine("<html>");
-            sb.AppendLine("<head>");
-            sb.AppendLine("<meta charset='UTF-8'>");
-            sb.AppendLine("<style>");
-            sb.AppendLine("body { font-family: Arial, sans-serif; background-color: #f5f5f5; }");
-            sb.AppendLine(".container { max-width: 600px; margin: 20px auto; background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }");
-            sb.AppendLine(".header { text-align: center; color: #333; margin-bottom: 20px; }");
-            sb.AppendLine(".alert { background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 15px 0; }");
-            sb.AppendLine(".alert-title { font-weight: bold; color: #856404; margin-bottom: 8px; }");
-            sb.AppendLine(".code-box { background-color: #f0f0f0; border: 2px solid #ff9800; padding: 20px; text-align: center; margin: 20px 0; border-radius: 4px; }");
-            sb.AppendLine(".code { font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #ff9800; }");
-            sb.AppendLine(".device-info { background-color: #f9f9f9; border: 1px solid #ddd; padding: 15px; margin: 15px 0; border-radius: 4px; font-size: 13px; color: #666; }");
-            sb.AppendLine(".message { color: #666; line-height: 1.6; margin: 15px 0; }");
-            sb.AppendLine(".footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px; }");
-            sb.AppendLine("</style>");
-            sb.AppendLine("</head>");
-            sb.AppendLine("<body>");
-            sb.AppendLine("<div class='container'>");
-            sb.AppendLine("<div class='header'><h2>Logout Verification Required</h2></div>");
-            sb.AppendLine($"<p class='message'>Hello {userName},</p>");
-            sb.AppendLine("<div class='alert'>");
-            sb.AppendLine("<div class='alert-title'>Security Alert</div>");
-            sb.AppendLine("<div>A logout request was initiated on your account. To complete the logout, please verify using the code below.</div>");
-            sb.AppendLine("</div>");
-            sb.AppendLine("<p class='message'>Your logout verification code is:</p>");
-            sb.AppendLine("<div class='code-box'>");
-            sb.AppendLine($"<div class='code'>{code}</div>");
-            sb.AppendLine("</div>");
-            sb.AppendLine("<div class='device-info'>");
-            sb.AppendLine("<strong>Logout Request Details:</strong><br>");
-            sb.AppendLine($"IP Address: {ipAddress}<br>");
-            sb.AppendLine($"Device: {deviceInfo}<br>");
-            sb.AppendLine($"Time: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
-            sb.AppendLine("</div>");
-            sb.AppendLine("<p class='message'><strong>If this was not you:</strong> Do not share this code and immediately change your password.</p>");
-            sb.AppendLine("<div class='footer'>");
-            sb.AppendLine("<p>This is an automated email. Please do not reply to this message.</p>");
-            sb.AppendLine("</div>");
-            sb.AppendLine("</div>");
-            sb.AppendLine("</body>");
-            sb.AppendLine("</html>");
-            return sb.ToString();
-        }
+        return $@"
+            <html>
+                <body style=""font-family: Arial, sans-serif; color: #333;"">
+                    <h2>Approval Confirmation</h2>
+                    <p>Hello {userName},</p>
+                    <p>You have successfully approved deferral <strong>{deferralNumber}</strong> for customer <strong>{customerName}</strong>.</p>
+                    <p>{nextStep}</p>
+                    <hr>
+                    <p>This is an automated email. Please do not reply.</p>
+                </body>
+            </html>";
+    }
 
-        private string BuildMFAEnabledHtml(string userName, int backupCodeCount)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("<!DOCTYPE html>");
-            sb.AppendLine("<html>");
-            sb.AppendLine("<head>");
-            sb.AppendLine("<meta charset='UTF-8'>");
-            sb.AppendLine("<style>");
-            sb.AppendLine("body { font-family: Arial, sans-serif; background-color: #f5f5f5; }");
-            sb.AppendLine(".container { max-width: 600px; margin: 20px auto; background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }");
-            sb.AppendLine(".header { text-align: center; color: #333; margin-bottom: 20px; }");
-            sb.AppendLine(".success-box { background-color: #d4edda; border: 1px solid #c3e6cb; border-left: 4px solid #28a745; padding: 15px; margin: 15px 0; border-radius: 4px; color: #155724; }");
-            sb.AppendLine(".info-box { background-color: #d1ecf1; border: 1px solid #bee5eb; border-left: 4px solid #17a2b8; padding: 15px; margin: 15px 0; border-radius: 4px; color: #0c5460; }");
-            sb.AppendLine(".message { color: #666; line-height: 1.6; margin: 15px 0; }");
-            sb.AppendLine(".footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px; }");
-            sb.AppendLine("</style>");
-            sb.AppendLine("</head>");
-            sb.AppendLine("<body>");
-            sb.AppendLine("<div class='container'>");
-            sb.AppendLine("<div class='header'><h2>Multi-Factor Authentication Enabled</h2></div>");
-            sb.AppendLine($"<p class='message'>Hello {userName},</p>");
-            sb.AppendLine("<div class='success-box'>");
-            sb.AppendLine("<strong>Success!</strong> Multi-factor authentication (MFA) has been enabled on your account.");
-            sb.AppendLine("</div>");
-            sb.AppendLine("<div class='info-box'>");
-            sb.AppendLine($"<strong>Backup Codes:</strong> You have {backupCodeCount} backup codes available. Please store them in a secure location. These codes can be used to access your account if you lose access to your authenticator app.");
-            sb.AppendLine("</div>");
-            sb.AppendLine("<p class='message'><strong>What's Next:</strong></p>");
-            sb.AppendLine("<ul>");
-            sb.AppendLine("<li>Download and save your backup codes securely</li>");
-            sb.AppendLine("<li>Use your authenticator app when logging in</li>");
-            sb.AppendLine("<li>Keep your backup codes in a safe place</li>");
-            sb.AppendLine("</ul>");
-            sb.AppendLine("<p class='message'>If you did not enable MFA, please contact support immediately.</p>");
-            sb.AppendLine("<div class='footer'>");
-            sb.AppendLine("<p>This is an automated email. Please do not reply to this message.</p>");
-            sb.AppendLine("</div>");
-            sb.AppendLine("</div>");
-            sb.AppendLine("</body>");
-            sb.AppendLine("</html>");
-            return sb.ToString();
-        }
+    private string GetDeferralRejectedToRmHtml(string userName, string deferralNumber, string customerName, string rejectionReason, string rejectedByName)
+    {
+        return $@"
+            <html>
+                <body style=""font-family: Arial, sans-serif; color: #333;"">
+                    <h2>Deferral Rejected</h2>
+                    <p>Hello {userName},</p>
+                    <p>Your deferral <strong>{deferralNumber}</strong> for customer <strong>{customerName}</strong> has been rejected by <strong>{rejectedByName}</strong>.</p>
+                    <p><strong>Reason:</strong> {rejectionReason}</p>
+                    <p>Please review and take the next action in the system.</p>
+                    <hr>
+                    <p>This is an automated email. Please do not reply.</p>
+                </body>
+            </html>";
+    }
 
-        private string ExtractDeviceInfoFromUserAgent(string userAgent)
-        {
-            if (string.IsNullOrEmpty(userAgent))
-                return "Unknown Device";
+    private string GetDeferralReturnedToRmHtml(string userName, string deferralNumber, string customerName, string reworkComment, string returnedByName)
+    {
+        return $@"
+            <html>
+                <body style=""font-family: Arial, sans-serif; color: #333;"">
+                    <h2>Deferral Returned for Rework</h2>
+                    <p>Hello {userName},</p>
+                    <p>Your deferral <strong>{deferralNumber}</strong> for customer <strong>{customerName}</strong> has been returned for rework by <strong>{returnedByName}</strong>.</p>
+                    <p><strong>Rework instructions:</strong> {reworkComment}</p>
+                    <p>Please review and update the deferral in the system.</p>
+                    <hr>
+                    <p>This is an automated email. Please do not reply.</p>
+                </body>
+            </html>";
+    }
 
-            userAgent = userAgent.ToLower();
+    private string GetDeferralReturnConfirmationHtml(string userName, string deferralNumber, string customerName, string reworkComment)
+    {
+        return $@"
+            <html>
+                <body style=""font-family: Arial, sans-serif; color: #333;"">
+                    <h2>Return for Rework Recorded</h2>
+                    <p>Hello {userName},</p>
+                    <p>You have successfully returned deferral <strong>{deferralNumber}</strong> for customer <strong>{customerName}</strong> for rework.</p>
+                    <p><strong>Instructions sent to RM:</strong> {reworkComment}</p>
+                    <hr>
+                    <p>This is an automated email. Please do not reply.</p>
+                </body>
+            </html>";
+    }
 
-            if (userAgent.Contains("windows"))
-                return "Windows Desktop";
-            else if (userAgent.Contains("mac"))
-                return "Mac Desktop";
-            else if (userAgent.Contains("iphone"))
-                return "iPhone Mobile";
-            else if (userAgent.Contains("ipad"))
-                return "iPad Tablet";
-            else if (userAgent.Contains("android"))
-                return "Android Mobile";
-            else if (userAgent.Contains("linux"))
-                return "Linux Desktop";
+    private string GetDeferralRejectConfirmationHtml(string userName, string deferralNumber, string customerName, string rejectionReason)
+    {
+        return $@"
+            <html>
+                <body style=""font-family: Arial, sans-serif; color: #333;"">
+                    <h2>Rejection Recorded</h2>
+                    <p>Hello {userName},</p>
+                    <p>You have successfully rejected deferral <strong>{deferralNumber}</strong> for customer <strong>{customerName}</strong>.</p>
+                    <p><strong>Reason recorded:</strong> {rejectionReason}</p>
+                    <hr>
+                    <p>This is an automated email. Please do not reply.</p>
+                </body>
+            </html>";
+    }
 
-            return "Unknown Device";
-        }
+    // ✅ HTML template for checker status changed
+    private string GetCheckerStatusChangedHtml(string userName, string dclNo, string status)
+    {
+        return $@"
+            <html>
+                <body style=""font-family: Arial, sans-serif; color: #333;"">
+                    <h2>DCL Status Update</h2>
+                    <p>Hello {userName},</p>
+                    <p>Your DCL <strong>{dclNo}</strong> status has been changed to <strong>{status}</strong>.</p>
+                    <p>Please log in to the system to review the details.</p>
+                    <hr>
+                    <p>This is an automated email. Please do not reply.</p>
+                </body>
+            </html>";
+    }
 
-        public async Task<bool> SendCheckerStatusChangedAsync(string toEmail, string userName, string dclNo, string status)
-        {
-            var subject = $"Checklist Status Update - {dclNo}";
-            var htmlContent = BuildStatusChangedHtml(userName, dclNo, status);
-            return await SendEmailAsync(toEmail, subject, htmlContent);
-        }
+    // ✅ HTML template for extension approval request
+    private string GetExtensionApprovalRequestHtml(string userName, string deferralNumber, string requesterName)
+    {
+        return $@"
+            <html>
+                <body style=""font-family: Arial, sans-serif; color: #333;"">
+                    <h2>Extension Request</h2>
+                    <p>Hello {userName},</p>
+                    <p><strong>{requesterName}</strong> has requested an extension for Deferral <strong>{deferralNumber}</strong>.</p>
+                    <p>Please review and take action in the system.</p>
+                    <hr>
+                    <p>This is an automated email. Please do not reply.</p>
+                </body>
+            </html>";
+    }
 
-        public async Task<bool> SendExtensionApprovalRequestAsync(string toEmail, string userName, string deferralNumber, string requesterName)
-        {
-            var subject = $"Extension Approval Request - {deferralNumber}";
-            var htmlContent = BuildExtensionApprovalHtml(userName, deferralNumber, requesterName);
-            return await SendEmailAsync(toEmail, subject, htmlContent);
-        }
+    // ✅ HTML template for extension status update
+    private string GetExtensionStatusUpdateHtml(string userName, string deferralNumber, string status)
+    {
+        return $@"
+            <html>
+                <body style=""font-family: Arial, sans-serif; color: #333;"">
+                    <h2>Extension Request Update</h2>
+                    <p>Hello {userName},</p>
+                    <p>The extension request for Deferral <strong>{deferralNumber}</strong> has been <strong>{status}</strong>.</p>
+                    <p>Please log in to the system to view the details.</p>
+                    <hr>
+                    <p>This is an automated email. Please do not reply.</p>
+                </body>
+            </html>";
+    }
 
-        public async Task<bool> SendExtensionStatusUpdateAsync(string toEmail, string userName, string deferralNumber, string status)
-        {
-            var subject = $"Extension Status Update - {deferralNumber}";
-            var htmlContent = BuildExtensionStatusHtml(userName, deferralNumber, status);
-            return await SendEmailAsync(toEmail, subject, htmlContent);
-        }
+    // ✅ HTML template for checker approval
+    private string GetCheckerApprovedHtml(string userName, string dclNo, string checkerName)
+    {
+        return $@"
+            <html>
+                <body style=""font-family: Arial, sans-serif; color: #333;"">
+                    <h2>DCL Approved</h2>
+                    <p>Hello {userName},</p>
+                    <p>Your DCL <strong>{dclNo}</strong> has been <strong>approved</strong> by checker <strong>{checkerName}</strong>.</p>
+                    <p>Thank you for your submission.</p>
+                    <hr>
+                    <p>This is an automated email. Please do not reply.</p>
+                </body>
+            </html>";
+    }
 
-        public async Task<bool> SendCheckerApprovedAsync(string toEmail, string userName, string checklistId, string dclNo, string checkerName)
-        {
-            var subject = $"Checklist Approved - {dclNo}";
-            var htmlContent = BuildCheckerApprovedHtml(userName, dclNo, checkerName);
-            return await SendEmailAsync(toEmail, subject, htmlContent);
-        }
+    // ✅ HTML template for checker returned
+    private string GetCheckerReturnedHtml(string userName, string dclNo, string checkerName)
+    {
+        return $@"
+            <html>
+                <body style=""font-family: Arial, sans-serif; color: #333;"">
+                    <h2>DCL Returned for Revision</h2>
+                    <p>Hello {userName},</p>
+                    <p>Your DCL <strong>{dclNo}</strong> has been <strong>returned</strong> by checker <strong>{checkerName}</strong> for revision.</p>
+                    <p>Please review the feedback and resubmit.</p>
+                    <hr>
+                    <p>This is an automated email. Please do not reply.</p>
+                </body>
+            </html>";
+    }
 
-        public async Task<bool> SendCheckerReturnedAsync(string toEmail, string userName, string checklistId, string dclNo, string checkerName)
-        {
-            var subject = $"Checklist Returned - {dclNo}";
-            var htmlContent = BuildCheckerReturnedHtml(userName, dclNo, checkerName);
-            return await SendEmailAsync(toEmail, subject, htmlContent);
-        }
+    private string GetFirstApproverReplacedHtml(string userName, string deferralNumber, string customerName, string replacementName)
+    {
+        return $@"
+            <html>
+                <body style=""font-family: Arial, sans-serif; color: #333;"">
+                    <h2>Approval Flow Updated</h2>
+                    <p>Hello {userName},</p>
+                    <p>You are no longer the first approver for deferral <strong>{deferralNumber}</strong> ({customerName}).</p>
+                    <p><strong>New first approver:</strong> {replacementName}</p>
+                    <p>If you have any questions, please contact the Relationship Manager.</p>
+                    <hr>
+                    <p>This is an automated email. Please do not reply.</p>
+                </body>
+            </html>";
+    }
 
-        private string BuildStatusChangedHtml(string userName, string dclNo, string status)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("<!DOCTYPE html>");
-            sb.AppendLine("<html><head><meta charset='UTF-8'><style>");
-            sb.AppendLine("body { font-family: Arial, sans-serif; background-color: #f5f5f5; }");
-            sb.AppendLine(".container { max-width: 600px; margin: 20px auto; background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }");
-            sb.AppendLine(".header { text-align: center; color: #333; margin-bottom: 20px; }");
-            sb.AppendLine(".content { color: #666; line-height: 1.6; }");
-            sb.AppendLine(".footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px; }");
-            sb.AppendLine("</style></head><body>");
-            sb.AppendLine("<div class='container'><div class='header'><h2>Checklist Status Update</h2></div>");
-            sb.AppendLine($"<div class='content'><p>Hello {userName},</p>");
-            sb.AppendLine($"<p>The status of checklist <strong>{dclNo}</strong> has been updated to <strong>{status}</strong>.</p>");
-            sb.AppendLine("<p>Please log in to the system to view more details.</p></div>");
-            sb.AppendLine("<div class='footer'><p>This is an automated email. Please do not reply.</p></div>");
-            sb.AppendLine("</div></body></html>");
-            return sb.ToString();
-        }
+    private string GetFirstApproverAssignedHtml(string userName, string deferralNumber, string customerName, string replacedName)
+    {
+        return $@"
+            <html>
+                <body style=""font-family: Arial, sans-serif; color: #333;"">
+                    <h2>New First Approver Assignment</h2>
+                    <p>Hello {userName},</p>
+                    <p>You have been assigned as the first approver for deferral <strong>{deferralNumber}</strong> ({customerName}).</p>
+                    <p><strong>Previous first approver:</strong> {replacedName}</p>
+                    <p>Please review and take action in the DCL system.</p>
+                    <hr>
+                    <p>This is an automated email. Please do not reply.</p>
+                </body>
+            </html>";
+    }
 
-        private string BuildExtensionApprovalHtml(string userName, string deferralNumber, string requesterName)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("<!DOCTYPE html>");
-            sb.AppendLine("<html><head><meta charset='UTF-8'><style>");
-            sb.AppendLine("body { font-family: Arial, sans-serif; background-color: #f5f5f5; }");
-            sb.AppendLine(".container { max-width: 600px; margin: 20px auto; background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }");
-            sb.AppendLine(".header { text-align: center; color: #333; margin-bottom: 20px; }");
-            sb.AppendLine(".content { color: #666; line-height: 1.6; }");
-            sb.AppendLine(".footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px; }");
-            sb.AppendLine("</style></head><body>");
-            sb.AppendLine("<div class='container'><div class='header'><h2>Extension Approval Request</h2></div>");
-            sb.AppendLine($"<div class='content'><p>Hello {userName},</p>");
-            sb.AppendLine($"<p>An extension approval request has been submitted for deferral <strong>{deferralNumber}</strong> by {requesterName}.</p>");
-            sb.AppendLine("<p>Please log in to the system to review and take action.</p></div>");
-            sb.AppendLine("<div class='footer'><p>This is an automated email. Please do not reply.</p></div>");
-            sb.AppendLine("</div></body></html>");
-            return sb.ToString();
-        }
+    // ✅ NEW: Email verification code HTML helper
+    private string GetEmailVerificationCodeHtml(string verificationCode, int expiryMinutes)
+    {
+        return $@"
+            <html>
+                <body style=""font-family: Arial, sans-serif; color: #333;"">
+                    <h2>Email Verification Code</h2>
+                    <p>Your email verification code is:</p>
+                    <p style=""font-size: 24px; font-weight: bold; color: #164679; letter-spacing: 2px;"">{verificationCode}</p>
+                    <p>This code will expire in <strong>{expiryMinutes} minutes</strong>.</p>
+                    <p>If you did not request this code, please ignore this email.</p>
+                    <hr>
+                    <p>This is an automated email. Please do not reply.</p>
+                </body>
+            </html>";
+    }
 
-        private string BuildExtensionStatusHtml(string userName, string deferralNumber, string status)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("<!DOCTYPE html>");
-            sb.AppendLine("<html><head><meta charset='UTF-8'><style>");
-            sb.AppendLine("body { font-family: Arial, sans-serif; background-color: #f5f5f5; }");
-            sb.AppendLine(".container { max-width: 600px; margin: 20px auto; background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }");
-            sb.AppendLine(".header { text-align: center; color: #333; margin-bottom: 20px; }");
-            sb.AppendLine(".content { color: #666; line-height: 1.6; }");
-            sb.AppendLine(".footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px; }");
-            sb.AppendLine("</style></head><body>");
-            sb.AppendLine("<div class='container'><div class='header'><h2>Extension Status Update</h2></div>");
-            sb.AppendLine($"<div class='content'><p>Hello {userName},</p>");
-            sb.AppendLine($"<p>The extension for deferral <strong>{deferralNumber}</strong> has been updated to <strong>{status}</strong>.</p>");
-            sb.AppendLine("<p>Please log in to the system for more details.</p></div>");
-            sb.AppendLine("<div class='footer'><p>This is an automated email. Please do not reply.</p></div>");
-            sb.AppendLine("</div></body></html>");
-            return sb.ToString();
-        }
+    // ✅ NEW: Logout verification HTML helper
+    private string GetLogoutVerificationHtml(string userName, string verificationCode, string ipAddress, string userAgent)
+    {
+        return $@"
+            <html>
+                <body style=""font-family: Arial, sans-serif; color: #333;"">
+                    <h2>Logout Verification Required</h2>
+                    <p>Hello {userName},</p>
+                    <p>A logout request has been initiated on your account.</p>
+                    <p><strong>Verification Code:</strong></p>
+                    <p style=""font-size: 20px; font-weight: bold; color: #164679;"">{verificationCode}</p>
+                    <p><strong>Login Details:</strong></p>
+                    <ul>
+                        <li><strong>IP Address:</strong> {ipAddress}</li>
+                        <li><strong>Device:</strong> {userAgent}</li>
+                        <li><strong>Time:</strong> {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC</li>
+                    </ul>
+                    <p>If this logout request was not initiated by you, please contact support immediately.</p>
+                    <hr>
+                    <p>This is an automated email. Please do not reply.</p>
+                </body>
+            </html>";
+    }
 
-        private string BuildCheckerApprovedHtml(string userName, string dclNo, string checkerName)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("<!DOCTYPE html>");
-            sb.AppendLine("<html><head><meta charset='UTF-8'><style>");
-            sb.AppendLine("body { font-family: Arial, sans-serif; background-color: #f5f5f5; }");
-            sb.AppendLine(".container { max-width: 600px; margin: 20px auto; background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }");
-            sb.AppendLine(".header { text-align: center; color: #333; margin-bottom: 20px; }");
-            sb.AppendLine(".success-box { background-color: #d4edda; border: 1px solid #c3e6cb; border-left: 4px solid #28a745; padding: 15px; margin: 15px 0; border-radius: 4px; color: #155724; }");
-            sb.AppendLine(".content { color: #666; line-height: 1.6; }");
-            sb.AppendLine(".footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px; }");
-            sb.AppendLine("</style></head><body>");
-            sb.AppendLine("<div class='container'><div class='header'><h2>Checklist Approved</h2></div>");
-            sb.AppendLine("<div class='success-box'><p><strong>Your checklist has been approved!</strong></p></div>");
-            sb.AppendLine($"<div class='content'><p>Hello {userName},</p>");
-            sb.AppendLine($"<p>Your checklist <strong>{dclNo}</strong> has been approved by {checkerName}.</p>");
-            sb.AppendLine("<p>Thank you for completing the required documentation.</p></div>");
-            sb.AppendLine("<div class='footer'><p>This is an automated email. Please do not reply.</p></div>");
-            sb.AppendLine("</div></body></html>");
-            return sb.ToString();
-        }
+    public async Task SendCheckerStatusChangedAsync(string toEmail, string userName, string dclNo, string status)
+    {
+        var subject = $"DCL {dclNo} Status Update";
+        var htmlBody = GetCheckerStatusChangedHtml(userName, dclNo, status);
+        await SendEmailAsync(toEmail, subject, htmlBody);
+    }
 
-        private string BuildCheckerReturnedHtml(string userName, string dclNo, string checkerName)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("<!DOCTYPE html>");
-            sb.AppendLine("<html><head><meta charset='UTF-8'><style>");
-            sb.AppendLine("body { font-family: Arial, sans-serif; background-color: #f5f5f5; }");
-            sb.AppendLine(".container { max-width: 600px; margin: 20px auto; background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }");
-            sb.AppendLine(".header { text-align: center; color: #333; margin-bottom: 20px; }");
-            sb.AppendLine(".warning-box { background-color: #fff3cd; border: 1px solid #ffeaa7; border-left: 4px solid #ffc107; padding: 15px; margin: 15px 0; border-radius: 4px; color: #856404; }");
-            sb.AppendLine(".content { color: #666; line-height: 1.6; }");
-            sb.AppendLine(".footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px; }");
-            sb.AppendLine("</style></head><body>");
-            sb.AppendLine("<div class='container'><div class='header'><h2>Checklist Returned for Revision</h2></div>");
-            sb.AppendLine("<div class='warning-box'><p><strong>Your checklist requires revision.</strong></p></div>");
-            sb.AppendLine($"<div class='content'><p>Hello {userName},</p>");
-            sb.AppendLine($"<p>Your checklist <strong>{dclNo}</strong> has been returned by {checkerName} for revision.</p>");
-            sb.AppendLine("<p>Please review the feedback and make the necessary corrections before resubmitting.</p></div>");
-            sb.AppendLine("<div class='footer'><p>This is an automated email. Please do not reply.</p></div>");
-            sb.AppendLine("</div></body></html>");
-            return sb.ToString();
-        }
+    public async Task SendDeferralSubmittedAsync(string toEmail, string userName, string deferralNumber, string customerName, int daysSought, string recipientRole)
+    {
+        var subject = $"Deferral Submitted: {deferralNumber}";
+        var htmlBody = GetDeferralSubmittedHtml(userName, deferralNumber, customerName, daysSought, recipientRole);
+        await SendEmailAsync(toEmail, subject, htmlBody);
+    }
+
+    public async Task SendDeferralReminderAsync(string toEmail, string userName, string deferralNumber, string customerName)
+    {
+        var subject = $"Reminder: Deferral {deferralNumber} Awaiting Approval";
+        var htmlBody = GetDeferralReminderHtml(userName, deferralNumber, customerName);
+        await SendEmailAsync(toEmail, subject, htmlBody);
+    }
+
+    public async Task SendDeferralApprovalConfirmationAsync(string toEmail, string userName, string deferralNumber, string customerName, string? nextApproverName, bool isFinalApproval)
+    {
+        var subject = isFinalApproval
+            ? $"Confirmation: Final Approval Recorded for {deferralNumber}"
+            : $"Confirmation: You Approved {deferralNumber}";
+        var htmlBody = GetDeferralApprovalConfirmationHtml(userName, deferralNumber, customerName, nextApproverName, isFinalApproval);
+        await SendEmailAsync(toEmail, subject, htmlBody);
+    }
+
+    public async Task SendDeferralRejectedToRmAsync(string toEmail, string userName, string deferralNumber, string customerName, string rejectionReason, string rejectedByName)
+    {
+        var subject = $"Deferral Rejected: {deferralNumber}";
+        var htmlBody = GetDeferralRejectedToRmHtml(userName, deferralNumber, customerName, rejectionReason, rejectedByName);
+        await SendEmailAsync(toEmail, subject, htmlBody);
+    }
+
+    public async Task SendDeferralReturnedToRmAsync(string toEmail, string userName, string deferralNumber, string customerName, string reworkComment, string returnedByName)
+    {
+        var subject = $"Deferral Returned for Rework: {deferralNumber}";
+        var htmlBody = GetDeferralReturnedToRmHtml(userName, deferralNumber, customerName, reworkComment, returnedByName);
+        await SendEmailAsync(toEmail, subject, htmlBody);
+    }
+
+    public async Task SendDeferralReturnConfirmationAsync(string toEmail, string userName, string deferralNumber, string customerName, string reworkComment)
+    {
+        var subject = $"Confirmation: You Returned {deferralNumber} for Rework";
+        var htmlBody = GetDeferralReturnConfirmationHtml(userName, deferralNumber, customerName, reworkComment);
+        await SendEmailAsync(toEmail, subject, htmlBody);
+    }
+
+    public async Task SendDeferralRejectConfirmationAsync(string toEmail, string userName, string deferralNumber, string customerName, string rejectionReason)
+    {
+        var subject = $"Confirmation: You Rejected {deferralNumber}";
+        var htmlBody = GetDeferralRejectConfirmationHtml(userName, deferralNumber, customerName, rejectionReason);
+        await SendEmailAsync(toEmail, subject, htmlBody);
+    }
+
+    public async Task SendExtensionApprovalRequestAsync(string toEmail, string userName, string deferralNumber, string requesterName)
+    {
+        var subject = $"Extension Request for {deferralNumber}";
+        var htmlBody = GetExtensionApprovalRequestHtml(userName, deferralNumber, requesterName);
+        await SendEmailAsync(toEmail, subject, htmlBody);
+    }
+
+    public async Task SendExtensionStatusUpdateAsync(string toEmail, string userName, string deferralNumber, string status)
+    {
+        var subject = $"Extension Update for {deferralNumber}";
+        var htmlBody = GetExtensionStatusUpdateHtml(userName, deferralNumber, status);
+        await SendEmailAsync(toEmail, subject, htmlBody);
+    }
+
+    // ✅ NEW: Checker approval notification (aligns with Node.js sendCheckerApproved)
+    public async Task SendCheckerApprovedAsync(string toEmail, string userName, string checklistId, string dclNo, string checkerName)
+    {
+        var subject = $"DCL {dclNo} Approved by Checker";
+        var htmlBody = GetCheckerApprovedHtml(userName, dclNo, checkerName);
+        await SendEmailAsync(toEmail, subject, htmlBody);
+    }
+
+    // ✅ NEW: Checker returned notification (aligns with Node.js sendCheckerReturned)
+    public async Task SendCheckerReturnedAsync(string toEmail, string userName, string checklistId, string dclNo, string checkerName)
+    {
+        var subject = $"DCL {dclNo} Returned by Checker";
+        var htmlBody = GetCheckerReturnedHtml(userName, dclNo, checkerName);
+        await SendEmailAsync(toEmail, subject, htmlBody);
+    }
+
+    public async Task SendFirstApproverReplacedAsync(string toEmail, string userName, string deferralNumber, string customerName, string replacementName)
+    {
+        var subject = $"First Approver Replaced: {deferralNumber}";
+        var htmlBody = GetFirstApproverReplacedHtml(userName, deferralNumber, customerName, replacementName);
+        await SendEmailAsync(toEmail, subject, htmlBody);
+    }
+
+    public async Task SendFirstApproverAssignedAsync(string toEmail, string userName, string deferralNumber, string customerName, string replacedName)
+    {
+        var subject = $"New First Approver Assignment: {deferralNumber}";
+        var htmlBody = GetFirstApproverAssignedHtml(userName, deferralNumber, customerName, replacedName);
+        await SendEmailAsync(toEmail, subject, htmlBody);
+    }
+
+    // ✅ NEW: Email verification code notification
+    public async Task SendEmailVerificationCodeAsync(string toEmail, string verificationCode, int expiryMinutes)
+    {
+        var subject = "Email Verification Code";
+        var htmlBody = GetEmailVerificationCodeHtml(verificationCode, expiryMinutes);
+        await SendEmailAsync(toEmail, subject, htmlBody);
+    }
+
+    // ✅ NEW: Logout verification email notification
+    public async Task SendLogoutVerificationEmailAsync(string toEmail, string userName, string verificationCode, string ipAddress, string userAgent)
+    {
+        var subject = "Logout Verification Required";
+        var htmlBody = GetLogoutVerificationHtml(userName, verificationCode, ipAddress, userAgent);
+        await SendEmailAsync(toEmail, subject, htmlBody);
     }
 }

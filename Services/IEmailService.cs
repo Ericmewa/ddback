@@ -2,18 +2,24 @@ namespace NCBA.DCL.Services;
 
 public interface IEmailService
 {
-    Task<bool> SendEmailAsync(string toEmail, string subject, string htmlContent);
-    Task<bool> SendCheckerStatusChangedAsync(string toEmail, string userName, string dclNo, string status);
-    Task<bool> SendExtensionApprovalRequestAsync(string toEmail, string userName, string deferralNumber, string requesterName);
-    Task<bool> SendExtensionStatusUpdateAsync(string toEmail, string userName, string deferralNumber, string status);
+    Task SendDeferralSubmittedAsync(string toEmail, string userName, string deferralNumber, string customerName, int daysSought, string recipientRole);
+    Task SendDeferralReminderAsync(string toEmail, string userName, string deferralNumber, string customerName);
+    Task SendDeferralApprovalConfirmationAsync(string toEmail, string userName, string deferralNumber, string customerName, string? nextApproverName, bool isFinalApproval);
+    Task SendDeferralReturnedToRmAsync(string toEmail, string userName, string deferralNumber, string customerName, string reworkComment, string returnedByName);
+    Task SendDeferralReturnConfirmationAsync(string toEmail, string userName, string deferralNumber, string customerName, string reworkComment);
+    Task SendDeferralRejectedToRmAsync(string toEmail, string userName, string deferralNumber, string customerName, string rejectionReason, string rejectedByName);
+    Task SendDeferralRejectConfirmationAsync(string toEmail, string userName, string deferralNumber, string customerName, string rejectionReason);
+    Task SendCheckerStatusChangedAsync(string toEmail, string userName, string dclNo, string status);
+    Task SendExtensionApprovalRequestAsync(string toEmail, string userName, string deferralNumber, string requesterName);
+    Task SendExtensionStatusUpdateAsync(string toEmail, string userName, string deferralNumber, string status);
 
     // ✅ NEW: Checker approval/return notifications (aligns with Node.js)
-    Task<bool> SendCheckerApprovedAsync(string toEmail, string userName, string checklistId, string dclNo, string checkerName);
-    Task<bool> SendCheckerReturnedAsync(string toEmail, string userName, string checklistId, string dclNo, string checkerName);
+    Task SendCheckerApprovedAsync(string toEmail, string userName, string checklistId, string dclNo, string checkerName);
+    Task SendCheckerReturnedAsync(string toEmail, string userName, string checklistId, string dclNo, string checkerName);
+    Task SendFirstApproverReplacedAsync(string toEmail, string userName, string deferralNumber, string customerName, string replacementName);
+    Task SendFirstApproverAssignedAsync(string toEmail, string userName, string deferralNumber, string customerName, string replacedName);
 
-    // ✅ NEW: Authentication email notifications
-    Task<bool> SendEmailVerificationCodeAsync(string toEmail, string code, int expiryMinutes = 15);
-    Task<bool> SendLogoutVerificationEmailAsync(string toEmail, string userName, string code, string ipAddress, string userAgent);
-    Task<bool> SendMFAEnabledNotificationAsync(string toEmail, string userName, int backupCodeCount = 10);
+    // ✅ NEW: Email verification and logout verification
+    Task SendEmailVerificationCodeAsync(string toEmail, string verificationCode, int expiryMinutes);
+    Task SendLogoutVerificationEmailAsync(string toEmail, string userName, string verificationCode, string ipAddress, string userAgent);
 }
-

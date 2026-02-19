@@ -1,4 +1,4 @@
-﻿{
+﻿﻿{
   "$schema": "http://json.schemastore.org/launchsettings.json",
   "iisSettings": {
     "windowsAuthentication": false,
@@ -16,7 +16,13 @@
       "launchUrl": "swagger",
       "applicationUrl": "http://localhost:5000",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "SMTP_HOST": "smtp.gmail.com",
+        "SMTP_PORT": "587",
+        "SMTP_SECURE": "true",
+        "SMTP_USER": "onyie22@gmail.com",
+        "SMTP_PASS": "ebxilvleourudbhu",
+        "EMAIL_FROM": "onyie22@gmail.com"
       }
     },
     "https": {
@@ -26,7 +32,13 @@
       "launchUrl": "swagger",
       "applicationUrl": "https://localhost:7150;http://localhost:5000",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "SMTP_HOST": "smtp.gmail.com",
+        "SMTP_PORT": "587",
+        "SMTP_SECURE": "true",
+        "SMTP_USER": "onyie22@gmail.com",
+        "SMTP_PASS": "ebxilvleourudbhu",
+        "EMAIL_FROM": "onyie22@gmail.com"
       }
     },
     "IIS Express": {
@@ -34,7 +46,13 @@
       "launchBrowser": true,
       "launchUrl": "swagger",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "SMTP_HOST": "smtp.gmail.com",
+        "SMTP_PORT": "587",
+        "SMTP_SECURE": "true",
+        "SMTP_USER": "onyie22@gmail.com",
+        "SMTP_PASS": "ebxilvleourudbhu",
+        "EMAIL_FROM": "onyie22@gmail.com"
       }
     }
   }
