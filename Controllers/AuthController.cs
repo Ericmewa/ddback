@@ -744,26 +744,7 @@ public class AuthController : ControllerBase
             if (user == null)
                 return NotFound(new { message = "User not found" });
 
-            // Generate secure 6-digit verification code
-            var verificationCode = GenerateSecureCode(6);
-            var verificationCodeHash = HashCode(verificationCode);
-
-            // Create logout session with verification
-            var logoutSession = new LogoutSession
-            {
-                Id = Guid.NewGuid(),
-                UserId = userId,
-                Code = verificationCodeHash,
-                IpAddress = GetClientIp(),
-                UserAgent = Request.Headers["User-Agent"].ToString(),
-                CreatedAt = DateTime.UtcNow,
-                ExpiresAt = DateTime.UtcNow.AddHours(1),
-                IsVerified = false
-            };
-
-            _context.LogoutSessions.Add(logoutSession);
-
-            // Log logout activity
+            // Immediate logout: record the action and return success.
             var userLog = new UserLog
             {
                 Id = Guid.NewGuid(),
@@ -778,23 +759,9 @@ public class AuthController : ControllerBase
 
             await _context.SaveChangesAsync();
 
-            // Send logout verification email
-            await _emailService.SendLogoutVerificationEmailAsync(
-                user.Email,
-                user.Name,
-                verificationCode,
-                logoutSession.IpAddress ?? "Unknown",
-                logoutSession.UserAgent ?? "Unknown"
-            );
+            _logger.LogInformation($"User {user.Email} logged out");
 
-            _logger.LogInformation($"User {user.Email} initiated logout with verification code sent");
-
-            return Ok(new
-            {
-                message = "Logout initiated. Verification code sent to your email.",
-                sessionId = logoutSession.Id,
-                expiresIn = 3600 // 1 hour in seconds
-            });
+            return Ok(new { message = "Logout successful" });
         }
         catch (Exception ex)
         {
@@ -810,49 +777,8 @@ public class AuthController : ControllerBase
     [HttpPost("verify-logout")]
     public async Task<IActionResult> VerifyLogout([FromBody] VerifyLogoutRequest request)
     {
-        try
-        {
-            // Find the logout session
-            var logoutSession = await _context.LogoutSessions
-                .Include(ls => ls.User)
-                .FirstOrDefaultAsync(ls =>
-                    ls.Id == request.SessionId &&
-                    !ls.IsVerified &&
-                    ls.ExpiresAt > DateTime.UtcNow);
-
-            if (logoutSession == null)
-                return BadRequest(new { message = "Invalid or expired logout session" });
-
-            // Verify the code
-            var isValidCode = VerifyCode(request.Code, logoutSession.Code);
-            if (!isValidCode)
-            {
-                _logger.LogWarning($"Invalid logout verification code attempt for session {request.SessionId}");
-                return BadRequest(new { message = "Incorrect verification code" });
-            }
-
-            // Mark session as verified
-            logoutSession.IsVerified = true;
-            logoutSession.VerifiedAt = DateTime.UtcNow;
-
-            // Optional: Invalidate all tokens for this user (implement token blacklist)
-            // await InvalidateUserTokensAsync(logoutSession.UserId);
-
-            await _context.SaveChangesAsync();
-
-            _logger.LogInformation($"Logout verified for user {logoutSession.User?.Email}");
-
-            return Ok(new
-            {
-                message = "Logout verified successfully. You have been logged out.",
-                verifiedAt = DateTime.UtcNow
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error verifying logout");
-            return StatusCode(500, new { message = "Error verifying logout" });
-        }
+        // Logout verification has been removed. Clients should call POST /api/admin/auth/logout
+        return BadRequest(new { message = "Logout verification removed. Call POST /api/admin/auth/logout to logout immediately." });
     }
 
     /// <summary>

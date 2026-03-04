@@ -119,6 +119,9 @@ public class ExtensionApprover
 
     public string? ApprovalComment { get; set; }
 
+    // Explicit sequence/order for approvers. Lower = earlier in the flow.
+    public int Sequence { get; set; } = 0;
+
     public bool IsCurrent { get; set; } = false;
 }
 

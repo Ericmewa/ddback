@@ -337,13 +337,38 @@ using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
     var context = services.GetRequiredService<ApplicationDbContext>();
+    var logger = services.GetRequiredService<ILogger<Program>>();
     try
     {
+        // Ensure the Extensions.LoanAmount column exists in the database.
+        try
+        {
+            var conn = context.Database.GetDbConnection();
+            await conn.OpenAsync();
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Extensions' AND COLUMN_NAME = 'LoanAmount'";
+                var countObj = await cmd.ExecuteScalarAsync();
+                var count = Convert.ToInt32(countObj);
+                if (count == 0)
+                {
+                    logger.LogInformation("Extensions.LoanAmount column missing; adding column now.");
+                    using var alter = conn.CreateCommand();
+                    alter.CommandText = "ALTER TABLE `Extensions` ADD COLUMN `LoanAmount` decimal(65,30) NULL";
+                    await alter.ExecuteNonQueryAsync();
+                    logger.LogInformation("Extensions.LoanAmount column added.");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to ensure Extensions.LoanAmount column exists");
+        }
+
         await DbInitializer.SeedData(context);
     }
     catch (Exception ex)
     {
-        var logger = services.GetRequiredService<ILogger<Program>>();
         logger.LogError(ex, "An error occurred seeding the DB.");
     }
 }

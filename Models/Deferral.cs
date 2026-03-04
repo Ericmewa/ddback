@@ -147,6 +147,11 @@ public class Deferral
 
     public string? ClosedReason { get; set; }
 
+    // Who closed/withdrew the deferral (nullable)
+    public Guid? ClosedById { get; set; }
+    public string? ClosedByName { get; set; }
+    public DateTime? ClosedAt { get; set; }
+
     public int CurrentApproverIndex { get; set; } = 0;
 
     public Guid? CreatedById { get; set; }

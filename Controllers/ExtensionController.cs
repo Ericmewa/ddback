@@ -6,7 +6,9 @@ using NCBA.DCL.DTOs;
 using NCBA.DCL.Middleware;
 using NCBA.DCL.Models;
 using NCBA.DCL.Services;
+using System.Linq;
 using System.Security.Claims;
+using System.Text.Json;
 
 namespace NCBA.DCL.Controllers;
 
@@ -40,7 +42,16 @@ public class ExtensionController : ControllerBase
     {
         try
         {
-            var userId = Guid.Parse(User.FindFirst("id")?.Value ?? string.Empty);
+            // Log incoming request for debugging
+            try
+            {
+                var reqJson = JsonSerializer.Serialize(new { request.DeferralId, request.RequestedDaysSought, request.ExtensionReason, additionalFiles = request.AdditionalFiles?.Count ?? 0 });
+                _logger.LogInformation("Incoming CreateExtension request: {req}", reqJson);
+            }
+            catch { }
+            var idClaim = User.FindFirst("id")?.Value;
+            if (!Guid.TryParse(idClaim, out var userId))
+                return StatusCode(401, new { message = "Invalid or missing user id claim" });
             var userName = User.FindFirst("name")?.Value ?? "User";
 
             var deferral = await _context.Deferrals.FindAsync(request.DeferralId);
@@ -64,7 +75,6 @@ public class ExtensionController : ControllerBase
                 CustomerName = deferral.CustomerName,
                 CustomerNumber = deferral.CustomerNumber,
                 DclNumber = deferral.DclNumber,
-                LoanAmount = deferral.LoanAmount,
                 NextDueDate = deferral.NextDueDate,
                 NextDocumentDueDate = deferral.NextDocumentDueDate,
                 SlaExpiry = deferral.SlaExpiry,
@@ -102,25 +112,21 @@ public class ExtensionController : ControllerBase
             if (!deferralApprovers.Any())
                 return BadRequest(new { message = "Deferral must have approvers to create extension" });
 
+            // Copy approvers from deferral preserving order and assign explicit sequence
+            int seq = 0;
             foreach (var approver in deferralApprovers)
             {
                 extension.Approvers.Add(new ExtensionApprover
                 {
                     UserId = approver.UserId,
-                    User = approver.User, // Ensure User is linked if available
+                    // Do not assign the tracked User entity here; only set UserId to avoid EF tracking/insert conflicts
                     Role = approver.Role,
                     ApprovalStatus = ApproverApprovalStatus.Pending,
-                    IsCurrent = false
+                    Sequence = seq,
+                    IsCurrent = seq == 0
                 });
-            }
 
-            // Set first approver as current
-            if (extension.Approvers.Any())
-            {
-                var firstApprover = extension.Approvers.OrderBy(a => a.UserId).First(); // Or by some sequence if exists. Node uses array index. 
-                // Since EF order is not guaranteed without sort, but list order is usually preserved.
-                // Better to use index loop or just take first added.
-                extension.Approvers.First().IsCurrent = true;
+                seq++;
             }
 
             extension.History.Add(new ExtensionHistory
@@ -157,12 +163,43 @@ public class ExtensionController : ControllerBase
                 }
             }
 
+            // Notify RM (requester) that extension application was created
+            try
+            {
+                var rmUser = deferral != null ? await _context.Users.FindAsync(deferral.CreatedById) : null;
+                // Fallback: the requester is the current authenticated RM
+                if ((rmUser == null || string.IsNullOrWhiteSpace(rmUser.Email)) && !string.IsNullOrWhiteSpace(userName))
+                {
+                    // nothing to do if no RM email
+                }
+                else if (rmUser != null && !string.IsNullOrWhiteSpace(rmUser.Email))
+                {
+                    try
+                    {
+                        await _emailService.SendExtensionApprovalRequestAsync(
+                            rmUser.Email,
+                            rmUser.Name,
+                            extension.DeferralNumber ?? "Unknown",
+                            userName);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to notify RM about extension application {ExtensionId}", extension.Id);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to perform RM notification after extension creation");
+            }
+
             return StatusCode(201, extension);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating extension");
-            return StatusCode(500, new { message = "Internal server error" });
+            var inner = ex.InnerException?.Message;
+            return StatusCode(500, new { message = "Internal server error", error = ex.Message, detail = inner });
         }
     }
 
@@ -172,7 +209,9 @@ public class ExtensionController : ControllerBase
     {
         try
         {
-            var userId = Guid.Parse(User.FindFirst("id")?.Value ?? string.Empty);
+            var idClaim = User.FindFirst("id")?.Value;
+            if (!Guid.TryParse(idClaim, out var userId))
+                return StatusCode(401, new { message = "Invalid or missing user id claim" });
 
             var extensions = await _context.Extensions
                 .Include(e => e.Deferral)
@@ -184,12 +223,72 @@ public class ExtensionController : ControllerBase
                 .OrderByDescending(e => e.CreatedAt)
                 .ToListAsync();
 
-            return Ok(extensions);
+            try
+            {
+                // Project to a lightweight shape to avoid serialization cycles and reduce payload
+                var result = extensions.Select(e => new
+                {
+                id = e.Id,
+                deferral = e.Deferral == null ? null : new
+                {
+                    _id = e.Deferral.Id,
+                    deferralNumber = e.Deferral.DeferralNumber,
+                    dclNumber = e.Deferral.DclNumber,
+                    customerName = e.Deferral.CustomerName,
+                    customerNumber = e.Deferral.CustomerNumber
+                },
+                deferralId = e.DeferralId,
+                deferralNumber = e.DeferralNumber,
+                customerName = e.CustomerName,
+                customerNumber = e.CustomerNumber,
+                requestedDaysSought = e.RequestedDaysSought,
+                currentDaysSought = e.CurrentDaysSought,
+                extensionReason = e.ExtensionReason,
+                status = e.Status.ToString(),
+                requestedById = e.RequestedById,
+                requestedByName = e.RequestedByName,
+                createdAt = e.CreatedAt,
+                updatedAt = e.UpdatedAt,
+                approvers = e.Approvers.Select(a => new
+                {
+                    id = a.Id,
+                    userId = a.UserId,
+                    role = a.Role,
+                    approvalStatus = a.ApprovalStatus.ToString(),
+                    isCurrent = a.IsCurrent,
+                    user = a.User == null ? null : new { _id = a.User.Id, name = a.User.Name, email = a.User.Email }
+                }).ToList(),
+                history = e.History.Select(h => new
+                {
+                    id = h.Id,
+                    action = h.Action,
+                    userId = h.UserId,
+                    userName = h.UserName,
+                    userRole = h.UserRole,
+                    date = h.Date,
+                    notes = h.Notes,
+                    comment = h.Comment
+                }).ToList(),
+                additionalFiles = e.AdditionalFiles.Select(f => new { id = f.Id, name = f.Name, url = f.Url, size = f.Size }).ToList(),
+                extensionStatus = e.Status.ToString(),
+                creatorApprovalStatus = e.CreatorApprovalStatus.ToString(),
+                checkerApprovalStatus = e.CheckerApprovalStatus.ToString(),
+                allApproversApproved = e.AllApproversApproved
+                }).ToList();
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                // Log and return an empty list as a safe fallback to avoid breaking the UI
+                _logger.LogError(ex, "Error projecting extensions for response, returning empty list as fallback");
+                return Ok(new object[0]);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting my extensions");
-            return StatusCode(500, new { message = "Internal server error" });
+            return StatusCode(500, new { message = "Internal server error", error = ex.Message });
         }
     }
 
@@ -203,7 +302,9 @@ public class ExtensionController : ControllerBase
     {
         try
         {
-            var userId = Guid.Parse(User.FindFirst("id")?.Value ?? string.Empty);
+            var idClaim = User.FindFirst("id")?.Value;
+            if (!Guid.TryParse(idClaim, out var userId))
+                return StatusCode(401, new { message = "Invalid or missing user id claim" });
 
             var extensions = await _context.Extensions
                 .Include(e => e.Deferral)
@@ -231,7 +332,9 @@ public class ExtensionController : ControllerBase
     {
         try
         {
-            var userId = Guid.Parse(User.FindFirst("id")?.Value ?? string.Empty);
+            var idClaim = User.FindFirst("id")?.Value;
+            if (!Guid.TryParse(idClaim, out var userId))
+                return StatusCode(401, new { message = "Invalid or missing user id claim" });
 
             var extensions = await _context.Extensions
                 .Include(e => e.Deferral)
@@ -258,7 +361,9 @@ public class ExtensionController : ControllerBase
     {
         try
         {
-            var userId = Guid.Parse(User.FindFirst("id")?.Value ?? string.Empty);
+            var idClaim = User.FindFirst("id")?.Value;
+            if (!Guid.TryParse(idClaim, out var userId))
+                return StatusCode(401, new { message = "Invalid or missing user id claim" });
 
             var extension = await _context.Extensions
                 .Include(e => e.Approvers)
@@ -289,21 +394,121 @@ public class ExtensionController : ControllerBase
                 Comment = request.Comment
             });
 
-            // Move to next approver
+            // Move to next approver based on explicit Sequence
             var nextApprover = extension.Approvers
-                .OrderBy(a => a.Id) // Assuming Id order implies sequence
-                .FirstOrDefault(a => a.ApprovalStatus == ApproverApprovalStatus.Pending);
+                .OrderBy(a => a.Sequence)
+                .FirstOrDefault(a => a.Sequence > currentApprover.Sequence && a.ApprovalStatus == ApproverApprovalStatus.Pending);
 
             if (nextApprover != null)
             {
                 nextApprover.IsCurrent = true;
                 extension.Status = ExtensionStatus.InReview;
+                // Notify next approver by email if available
+                if (nextApprover.UserId.HasValue)
+                {
+                    try
+                    {
+                        var approverUser = await _context.Users.FindAsync(nextApprover.UserId.Value);
+                        if (approverUser != null && !string.IsNullOrEmpty(approverUser.Email))
+                        {
+                            await _emailService.SendExtensionApprovalRequestAsync(
+                                approverUser.Email,
+                                approverUser.Name,
+                                extension.DeferralNumber ?? "Unknown",
+                                User.FindFirst("name")?.Value ?? "Requester");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to send extension notification to next approver");
+                    }
+                }
             }
             else
             {
                 extension.AllApproversApproved = true;
-                extension.Status = ExtensionStatus.Approved;
-                // Note: Logic to actually update the deferral days might go here or require creator/checker finalization depending on exact reqs
+                // Move to creator (CoCreator) for finalization rather than marking fully approved
+                extension.Status = ExtensionStatus.InReview;
+
+                // Add history entry indicating all approvers have approved
+                extension.History.Add(new ExtensionHistory
+                {
+                    Action = "all_approvers_approved",
+                    UserId = userId,
+                    UserName = User.FindFirst("name")?.Value,
+                    UserRole = User.FindFirst(ClaimTypes.Role)?.Value,
+                    Date = DateTime.UtcNow,
+                    Notes = "All approvers have approved the extension; awaiting CoCreator approval"
+                });
+
+                // Notify CoCreators (all users with role CoCreator)
+                // Notify RM that an approver approved and the extension moved to next approver
+                try
+                {
+                    var rm = await _context.Users.FindAsync(extension.DeferralId != null ? extension.DeferralId : (Guid?)null);
+                    // Better fetch deferral's creator if available
+                    var def = await _context.Deferrals.FindAsync(extension.DeferralId);
+                    var rmUser = def != null ? await _context.Users.FindAsync(def.CreatedById) : null;
+                    if (rmUser != null && !string.IsNullOrWhiteSpace(rmUser.Email))
+                    {
+                        var rmName = string.IsNullOrWhiteSpace(rmUser.Name) ? "Relationship Manager" : rmUser.Name;
+                        await _emailService.SendExtensionApprovalRequestAsync(
+                            rmUser.Email,
+                            rmName,
+                            extension.DeferralNumber ?? "Unknown",
+                            User.FindFirst("name")?.Value ?? "Approver");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to notify RM after approver approved extension {ExtensionId}", extension.Id);
+                }
+                try
+                {
+                    var coCreators = await _context.Users.Where(u => u.Role == UserRole.CoCreator && u.Active).ToListAsync();
+                    foreach (var cc in coCreators)
+                    {
+                        if (!string.IsNullOrEmpty(cc.Email))
+                        {
+                            try
+                            {
+                                await _emailService.SendExtensionApprovalRequestAsync(
+                                    cc.Email,
+                                    cc.Name,
+                                    extension.DeferralNumber ?? "Unknown",
+                                    User.FindFirst("name")?.Value ?? "Requester");
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Failed to send extension notification to cocreator {email}", cc.Email);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to notify cocreators after all approvers approved");
+                }
+
+                // Notify RM that all approvers have approved the extension
+                try
+                {
+                    var def = await _context.Deferrals.FindAsync(extension.DeferralId);
+                    var rmUser = def != null ? await _context.Users.FindAsync(def.CreatedById) : null;
+                    if (rmUser != null && !string.IsNullOrWhiteSpace(rmUser.Email))
+                    {
+                        var rmName = string.IsNullOrWhiteSpace(rmUser.Name) ? "Relationship Manager" : rmUser.Name;
+                        await _emailService.SendExtensionApprovalRequestAsync(
+                            rmUser.Email,
+                            rmName,
+                            extension.DeferralNumber ?? "Unknown",
+                            User.FindFirst("name")?.Value ?? "Approver");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to notify RM after all approvers approved extension {ExtensionId}", extension.Id);
+                }
             }
 
             await _context.SaveChangesAsync();
@@ -323,7 +528,9 @@ public class ExtensionController : ControllerBase
     {
         try
         {
-            var userId = Guid.Parse(User.FindFirst("id")?.Value ?? string.Empty);
+            var idClaim = User.FindFirst("id")?.Value;
+            if (!Guid.TryParse(idClaim, out var userId))
+                return StatusCode(401, new { message = "Invalid or missing user id claim" });
 
             var extension = await _context.Extensions
                 .Include(e => e.Approvers)
@@ -405,7 +612,9 @@ public class ExtensionController : ControllerBase
     {
         try
         {
-            var userId = Guid.Parse(User.FindFirst("id")?.Value ?? string.Empty);
+            var idClaim = User.FindFirst("id")?.Value;
+            if (!Guid.TryParse(idClaim, out var userId))
+                return StatusCode(401, new { message = "Invalid or missing user id claim" });
 
             var extension = await _context.Extensions
                 .Include(e => e.History)
@@ -430,6 +639,26 @@ public class ExtensionController : ControllerBase
             });
 
             await _context.SaveChangesAsync();
+
+            // Notify RM that CoCreator approved the extension
+            try
+            {
+                var def = await _context.Deferrals.FindAsync(extension.DeferralId);
+                var rmUser = def != null ? await _context.Users.FindAsync(def.CreatedById) : null;
+                if (rmUser != null && !string.IsNullOrWhiteSpace(rmUser.Email))
+                {
+                    var rmName = string.IsNullOrWhiteSpace(rmUser.Name) ? "Relationship Manager" : rmUser.Name;
+                    await _emailService.SendExtensionApprovalRequestAsync(
+                        rmUser.Email,
+                        rmName,
+                        extension.DeferralNumber ?? "Unknown",
+                        User.FindFirst("name")?.Value ?? "CoCreator");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to notify RM after cocreator approved extension {ExtensionId}", extension.Id);
+            }
 
             return Ok(new { message = "Extension approved by creator", extension });
         }
@@ -552,6 +781,26 @@ public class ExtensionController : ControllerBase
             }
 
             await _context.SaveChangesAsync();
+
+            // Notify RM that CoChecker approved and extension finalized
+            try
+            {
+                var def = await _context.Deferrals.FindAsync(extension.DeferralId);
+                var rmUser = def != null ? await _context.Users.FindAsync(def.CreatedById) : null;
+                if (rmUser != null && !string.IsNullOrWhiteSpace(rmUser.Email))
+                {
+                    var rmName = string.IsNullOrWhiteSpace(rmUser.Name) ? "Relationship Manager" : rmUser.Name;
+                    await _emailService.SendExtensionApprovalRequestAsync(
+                        rmUser.Email,
+                        rmName,
+                        extension.DeferralNumber ?? "Unknown",
+                        User.FindFirst("name")?.Value ?? "Checker");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to notify RM after cochecker approved extension {ExtensionId}", extension.Id);
+            }
 
             return Ok(new { message = "Extension approved by checker", extension });
         }
