@@ -76,6 +76,8 @@ public class User
     public ICollection<Checklist> CreatedChecklists { get; set; } = new List<Checklist>();
     public ICollection<Checklist> AssignedAsRM { get; set; } = new List<Checklist>();
     public ICollection<Checklist> AssignedAsCoChecker { get; set; } = new List<Checklist>();
+    // Checklists locked by this user (DCL locking feature)
+    public ICollection<Checklist> LockedChecklists { get; set; } = new List<Checklist>();
     public ICollection<UserLog> TargetUserLogs { get; set; } = new List<UserLog>();
     public ICollection<UserLog> PerformedByLogs { get; set; } = new List<UserLog>();
     public ICollection<Notification> Notifications { get; set; } = new List<Notification>();

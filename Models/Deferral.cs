@@ -166,6 +166,11 @@ public class Deferral
     public ICollection<Facility> Facilities { get; set; } = new List<Facility>();
     public ICollection<DeferralDocument> Documents { get; set; } = new List<DeferralDocument>();
     public ICollection<Approver> Approvers { get; set; } = new List<Approver>();
+    // Extension applications related to this deferral
+    public ICollection<Extension> Extensions { get; set; } = new List<Extension>();
+
+    // Latest extension status (string form) for lightweight display/filtering
+    public string? ExtensionStatus { get; set; }
 
     [NotMapped]
     public string? RmReason { get; set; }

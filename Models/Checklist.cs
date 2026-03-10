@@ -37,6 +37,10 @@ public class Checklist
     public Guid? AssignedToCoCheckerId { get; set; }
     public User? AssignedToCoChecker { get; set; }
 
+    // Locking support: which user currently holds a lock on this checklist (optional)
+    public Guid? LockedByUserId { get; set; }
+    public User? LockedByUser { get; set; }
+
     // Main Status
     public ChecklistStatus Status { get; set; } = ChecklistStatus.Pending;
 

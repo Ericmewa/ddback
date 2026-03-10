@@ -78,6 +78,12 @@ public class ApplicationDbContext : DbContext
                 .HasForeignKey(c => c.AssignedToCoCheckerId)
                 .OnDelete(DeleteBehavior.SetNull);
 
+            // Navigation: User locks checklists (DCL locking feature)
+            entity.HasMany(u => u.LockedChecklists)
+                .WithOne(c => c.LockedByUser)
+                .HasForeignKey(c => c.LockedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             // UserLog relations
             entity.HasMany(u => u.TargetUserLogs)
                 .WithOne(l => l.TargetUser)
@@ -249,7 +255,7 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.CreatorApprovalStatus).HasConversion<string>();
             entity.Property(e => e.CheckerApprovalStatus).HasConversion<string>();
 
-            entity.HasOne(e => e.Deferral).WithMany().HasForeignKey(e => e.DeferralId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.Deferral).WithMany(d => d.Extensions).HasForeignKey(e => e.DeferralId).OnDelete(DeleteBehavior.SetNull);
             entity.HasOne(e => e.RequestedBy).WithMany().HasForeignKey(e => e.RequestedById).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.CreatorApprovedBy).WithMany().HasForeignKey(e => e.CreatorApprovedById).OnDelete(DeleteBehavior.SetNull);
             entity.HasOne(e => e.CheckerApprovedBy).WithMany().HasForeignKey(e => e.CheckerApprovedById).OnDelete(DeleteBehavior.SetNull);
@@ -394,4 +400,3 @@ public class ApplicationDbContext : DbContext
         return base.SaveChangesAsync(cancellationToken);
     }
 }
-
